@@ -47,22 +47,62 @@ fall-detection-system/
 เพื่อให้ระบบทำงานได้อย่างมีประสิทธิภาพ ควรทำตามขั้นตอนดังนี้:
 
 
-### 1. การเตรียมสภาพแวดล้อม
-1. โคลนโปรเจ็คและเข้าใช้งานไฟล์:
-   ```bash
+### 1. การเตรียมสภาพแวดล้อม & เวอร์ชันที่ต้องการ (Setup & Versions)
+
+ระบบนี้พัฒนาและทดสอบด้วยเวอร์ชันดังต่อไปนี้:
+* **Python**: แนะนำเป็น **Python 3.13.x**
+* **Library หลัก & เวอร์ชัน**:
+  * `tensorflow==2.21.0` (สมองกลโมเดล GRU)
+  * `mediapipe==0.10.33` (ระบบตรวจจับท่าทางร่างกาย)
+  * `opencv-python==4.13.0.92` (การจัดการกล้องและการแสดงผล HUD)
+  * `keras==3.12.1` (การโหลดและรันโมเดล)
+  * `numpy==2.2.6` (การจัดการอาร์เรย์และคำนวณ)
+  * `pandas==2.3.3` (การสร้างและบันทึกชุดข้อมูล CSV)
+  * `scikit-learn==1.7.2` (การประเมินผลประสิทธิภาพโมเดล)
+  * `scipy==1.15.3` (การวิเคราะห์ทางสถิติและการคำนวณทางคณิตศาสตร์)
+
+#### ขั้นตอนการติดตั้ง:
+
+1. **โคลนโปรเจ็คและเข้าใช้งานโฟลเดอร์**:
+   ```powershell
    git clone https://github.com/tinarmon/fall-detection-system.git
    cd fall-detection-system
    ```
-2. สร้างสภาพแวดล้อมจำลองสำหรับงาน:
-   ```bash
-   python -m venv venv
-   Linux use : source venv/bin/activate  
-   Windows use: venv\Scripts\activate
-   ```
-3. ติดตั้งไลบรารี่:
-   ```bash
-   pip install -r requirements.txt
-   ```
+
+2. **สร้างสภาพแวดล้อมจำลอง (Virtual Environment)**:
+   * สำหรับ Windows (แนะนำ CPython 3.13):
+     ```powershell
+     py -3.13 -m venv venv
+     ```
+   * การเปิดใช้งาน Virtual Environment (Activate):
+     * **Windows (PowerShell)**:
+       ```powershell
+       .\venv\Scripts\Activate.ps1
+       ```
+     * **Windows (Command Prompt)**:
+       ```cmd
+       .\venv\Scripts\activate.bat
+       ```
+     * **Linux / macOS**:
+       ```bash
+       source venv/bin/activate
+       ```
+
+3. **ติดตั้งไลบรารี่และแพ็คเกจทั้งหมด**:
+   * ตรวจสอบให้แน่ใจว่าไฟล์ `requirements.txt` อยู่ในรูปแบบ UTF-8 จากนั้นรันคำสั่ง:
+     ```powershell
+     pip install -r requirements.txt
+     ```
+   * *หมายเหตุสำหรับ Windows*: หากเกิดข้อผิดพลาดในการติดตั้งเกี่ยวกับสิทธิ์การเข้าถึงไฟล์ (เช่น `WinError 32` เนื่องจากโปรแกรมสแกนไวรัสหรือระบบ Index ไฟล์ล็อกโฟลเดอร์ชั่วคราว) ให้ปิดโปรแกรมอื่นทั้งหมดแล้วรันคำสั่งดังกล่าวใหม่อีกครั้ง หรือใช้คำสั่งเพื่อบังคับติดตั้งใหม่:
+     ```powershell
+     pip install --upgrade --force-reinstall -r requirements.txt
+     ```
+
+#### ⚠️ คำแนะนำและข้อควรระวังพิเศษ:
+* **ข้อจำกัดเรื่องพาร์ทโฟลเดอร์ภาษาไทย (Unicode/Thai Path Limit)**: บนระบบปฏิบัติการ Windows หากพาร์ทที่ตั้งโปรเจ็คมีอักษรภาษาไทยหรืออักษรพิเศษ (เช่น `D:\ของอิ่ม\Project`) ตัวระบบตรวจจับ MediaPipe C++ Core จะไม่สามารถเปิดไฟล์โมเดล `.task` ได้โดยตรงผ่าน String Path และจะเกิดข้อผิดพลาด `FileNotFoundError` 
+  * *วิธีแก้ไข*: ตัวโปรเจ็คได้ถูกแก้ไขที่ไฟล์ `core/pose_estimator.py` ให้ทำการอ่านไฟล์แบบ Binary Bytes ก่อนส่งเข้าไปยัง MediaPipe ผ่าน `model_asset_buffer` แทนการใช้พาร์ทตรง เพื่อป้องกันปัญหานี้เรียบร้อยแล้ว
+* **การใช้งาน Python Interpreter**: โปรดรันโปรเจ็คด้วย CPython มาตรฐาน (`python`) เท่านั้น **ห้ามใช้ PyPy** เนื่องจากไลบรารี่การคำนวณระดับล่าง (TensorFlow, MediaPipe, OpenCV) มีการใช้ C-Extensions ที่ออกแบบมาสำหรับ CPython เท่านั้น
+
 
 ### 2. การเก็บข้อมูล (Data Collection)
 รันไฟล์ `collect_data.py` เพื่อสร้างชุดข้อมูลสอน AI

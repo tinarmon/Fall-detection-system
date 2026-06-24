@@ -7,7 +7,9 @@ import config
 class PoseEstimator:
     # Update default path
     def __init__(self, model_path=config.POSE_TASK_PATH):
-        base_options = python.BaseOptions(model_asset_path=model_path)
+        with open(model_path, 'rb') as f:
+            model_bytes = f.read()
+        base_options = python.BaseOptions(model_asset_buffer=model_bytes)
         options = vision.PoseLandmarkerOptions(
             base_options=base_options,
             running_mode=vision.RunningMode.IMAGE,
