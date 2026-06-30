@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+*.pyc
+.env
+mingit/
+data/raw/
+data/feature_statistics_report.csv
+data/live_collected_data.csv
