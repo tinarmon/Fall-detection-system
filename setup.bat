@@ -11,7 +11,7 @@ if %ERRORLEVEL% equ 0 (
     set PYTHON_CMD=py
     echo [OK] Found Python launcher 'py'
 ) else (
-    :: Check for python cmd
+    rem Check for python cmd
     where python >nul 2>nul
     if %ERRORLEVEL% equ 0 (
         set PYTHON_CMD=python
@@ -26,7 +26,7 @@ if %ERRORLEVEL% equ 0 (
 
 :: Create virtual environment
 if not exist venv (
-    echo Creating virtual environment (venv)...
+    echo Creating virtual environment [venv]...
     !PYTHON_CMD! -m venv venv
     if !ERRORLEVEL! neq 0 (
         echo [ERROR] ❌ Failed to create virtual environment.
