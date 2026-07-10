@@ -15,6 +15,7 @@ try:
     from analyze_features import run_analysis
     from train_model import run_training
     from live_inference import run_inference
+    from normalize_data import run_normalization
 except ImportError as e:
     print(f"[ERROR] Error importing core modules: {e}")
     sys.exit(1)
@@ -54,6 +55,16 @@ def check_diagnostics():
     else:
         print("   [INFO] ยังไม่มีการสร้างโฟลเดอร์เก็บข้อมูลดิบ (จะถูกสร้างเมื่อเริ่มบันทึกข้อมูล)")
 
+    clean_data_dir = config.CLEAN_DATA_DIR
+    clean_data_exists = os.path.exists(clean_data_dir)
+    print(f"4. Clean Data Directory: '{clean_data_dir}'")
+    if clean_data_exists:
+        import glob
+        clean_session_files = glob.glob(os.path.join(clean_data_dir, "session_*.csv"))
+        print(f"   [OK] โฟลเดอร์มีอยู่จริง (พบไฟล์เซสชันสะอาด: {len(clean_session_files)} ไฟล์)")
+    else:
+        print("   [INFO] ยังไม่มีการทำความสะอาดข้อมูลดิบ (สามารถเลือกเมนู 6 เพื่อทำความสะอาดได้)")
+
     input("\nกด Enter เพื่อกลับสู่เมนูหลัก...")
 
 def main():
@@ -68,10 +79,11 @@ def main():
         print("[3] ฝึกสอนโมเดลสมองเทียม AI (Model Training)")
         print("[4] ตรวจจับความเสี่ยงแบบเรียลไทม์ (Real-time Tracking)")
         print("[5] ตรวจสอบสถานะระบบ (Metadata Diagnostics)")
+        print("[6] ทำความสะอาดและปรับปรุงข้อมูลดิบ (Clean & Normalize Data)")
         print("[0] ออกจากโปรแกรม (Exit)")
         print("==================================================")
         
-        choice = input("ป้อนตัวเลือกของคุณ (0-5): ").strip()
+        choice = input("ป้อนตัวเลือกของคุณ (0-6): ").strip()
         
         if choice == "1":
             clear_screen()
@@ -108,12 +120,19 @@ def main():
             except Exception as e:
                 print(f"\n[ERROR] เกิดข้อผิดพลาดในการรันการตรวจสอบระบบ: {e}")
                 input("กด Enter เพื่อกลับสู่เมนูหลัก...")
+        elif choice == "6":
+            clear_screen()
+            try:
+                run_normalization()
+            except Exception as e:
+                print(f"\n[ERROR] เกิดข้อผิดพลาดในการรันการทำความสะอาดข้อมูล: {e}")
+                input("กด Enter เพื่อกลับสู่เมนูหลัก...")
         elif choice == "0":
             clear_screen()
             print("ขอบคุณที่ใช้งานระบบตรวจจับก่อนการล้ม สวัสดีครับ")
             break
         else:
-            print("\n[WARNING] ตัวเลือกไม่ถูกต้อง กรุณากรอกตัวเลขระหว่าง 0 ถึง 5")
+            print("\n[WARNING] ตัวเลือกไม่ถูกต้อง กรุณากรอกตัวเลขระหว่าง 0 ถึง 6")
             input("กด Enter เพื่อเลือกใหม่...")
 
 if __name__ == "__main__":

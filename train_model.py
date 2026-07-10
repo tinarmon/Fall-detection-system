@@ -20,7 +20,14 @@ EPOCHS = config.EPOCHS
 BATCH_SIZE = config.BATCH_SIZE
 
 def load_and_preprocess_data():
-    raw_dir = config.RAW_DATA_DIR
+    # เลือกใช้โฟลเดอร์ตามการตั้งค่า Clean หรือ Raw
+    if config.USE_CLEAN_DATA and os.path.exists(config.CLEAN_DATA_DIR):
+        raw_dir = config.CLEAN_DATA_DIR
+        data_type_str = "สะอาด (Cleaned Data)"
+    else:
+        raw_dir = config.RAW_DATA_DIR
+        data_type_str = "ดิบ (Raw Data)"
+
     if not os.path.exists(raw_dir):
         print(f"[ERROR] ไม่พบไดเรกทอรีเก็บข้อมูล: '{raw_dir}'")
         return None, None
@@ -30,7 +37,7 @@ def load_and_preprocess_data():
         print(f"[WARNING] ไม่พบไฟล์ข้อมูลเซสชัน (.csv) ใน '{raw_dir}'")
         return None, None
 
-    print(f"พบไฟล์ข้อมูลดิบทั้งหมด {len(csv_files)} ไฟล์ กำลังโหลดและรวมข้อมูลเพื่อใช้ฝึกสอน...")
+    print(f"พบไฟล์ข้อมูล {data_type_str} ทั้งหมด {len(csv_files)} ไฟล์ กำลังโหลดและรวมข้อมูลเพื่อใช้ฝึกสอน...")
 
     dataframes = []
     for f in csv_files:

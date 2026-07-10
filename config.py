@@ -8,6 +8,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
+CLEAN_DATA_DIR = os.path.join(DATA_DIR, "clean")
+USE_CLEAN_DATA = True
 
 # Files
 MODEL_PATH = os.path.join(ASSETS_DIR, "fall_model.keras")
@@ -55,3 +57,10 @@ COLOR_NORMAL = (0, 255, 0)      # Green
 COLOR_WARNING = (0, 165, 255)   # Orange
 COLOR_DANGER = (0, 0, 255)      # Red
 COLOR_TEXT = (255, 255, 255)    # White
+
+# ==========================================
+# 🧹 PREPROCESSING & DATA CLEANING SETTINGS
+# ==========================================
+JUMP_THRESHOLD = 0.15           # Horizontal centroid jump threshold to detect subject swaps
+OUTLIER_DISTANCE_THRESHOLD = 0.20 # Max horizontal distance from global median centroid
+MIN_OUTLIER_RUN = 3             # Min frames of a swap to clean

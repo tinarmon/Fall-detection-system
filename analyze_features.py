@@ -16,7 +16,14 @@ def run_analysis():
     print("[ANALYSIS] โหมดวิเคราะห์คุณลักษณะข้อมูล (Feature Analysis)")
     print("=" * 50)
 
-    raw_dir = config.RAW_DATA_DIR
+    # เลือกใช้โฟลเดอร์ตามการตั้งค่า Clean หรือ Raw
+    if config.USE_CLEAN_DATA and os.path.exists(config.CLEAN_DATA_DIR):
+        raw_dir = config.CLEAN_DATA_DIR
+        data_type_str = "สะอาด (Cleaned Data)"
+    else:
+        raw_dir = config.RAW_DATA_DIR
+        data_type_str = "ดิบ (Raw Data)"
+
     if not os.path.exists(raw_dir):
         print(f"[ERROR] ไม่พบไดเรกทอรีเก็บข้อมูล: '{raw_dir}'")
         input("กด Enter เพื่อกลับสู่เมนูหลัก...")
@@ -25,11 +32,11 @@ def run_analysis():
     csv_files = glob.glob(os.path.join(raw_dir, "session_*.csv"))
     if not csv_files:
         print(f"[WARNING] ไม่พบไฟล์ข้อมูลเซสชัน (.csv) ใน '{raw_dir}'")
-        print("กรุณาสะสมข้อมูลผ่านทางโหมด Data Acquisition ก่อน")
+        print("กรุณาสะสมข้อมูลผ่านทางโหมด Data Acquisition หรือ Clean & Normalize Data ก่อน")
         input("กด Enter เพื่อกลับสู่เมนูหลัก...")
         return
 
-    print(f"พบไฟล์ข้อมูลดิบทั้งหมด {len(csv_files)} ไฟล์ กำลังโหลดและรวมข้อมูล...")
+    print(f"พบไฟล์ข้อมูล {data_type_str} ทั้งหมด {len(csv_files)} ไฟล์ กำลังโหลดและรวมข้อมูล...")
 
     dataframes = []
     for f in csv_files:
