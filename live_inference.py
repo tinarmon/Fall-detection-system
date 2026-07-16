@@ -34,6 +34,65 @@ def ask_tester_name(current_name="Subject_01"):
         return name.strip()
     return "Unknown"
 
+def prompt_camera_settings():
+    print("\n" + "=" * 50)
+    print("📷 ตั้งค่ากล้องและการแสดงผล (Camera & Resolution Settings)")
+    print("=" * 50)
+    
+    # 1. เลือกดัชนีกล้อง
+    while True:
+        cam_input = input(f"ระบุหมายเลขกล้อง (Camera Index) (ปล่อยว่างเพื่อใช้ค่าเริ่มต้น {config.CAMERA_INDEX}): ").strip()
+        if cam_input == "":
+            camera_index = config.CAMERA_INDEX
+            break
+        try:
+            camera_index = int(cam_input)
+            if camera_index >= 0:
+                break
+            print("หมายเลขกล้องต้องมากกว่าหรือเท่ากับ 0")
+        except ValueError:
+            print("กรุณากรอกเฉพาะตัวเลขจำนวนเต็มเท่านั้น")
+            
+    # 2. เลือกความละเอียดกล้อง (Resolution)
+    print("\nกรุณาเลือกความละเอียดของกล้อง (Camera Resolution):")
+    print("  [1] 640x480 (แนะนำ - ประมวลผลเร็วที่สุด/ดีสำหรับ AI)")
+    print("  [2] 1280x720 (HD - คมชัดปานกลาง)")
+    print("  [3] 1920x1080 (Full HD - คมชัดสูง)")
+    print("  [4] กำหนดขนาดเอง (Custom Width/Height)")
+    print(f"  [ปล่อยว่าง] ใช้ค่าเริ่มต้นจากไฟล์ตั้งค่า ({config.CAMERA_WIDTH}x{config.CAMERA_HEIGHT})")
+    
+    while True:
+        res_choice = input("กรอกตัวเลือก (1-4 หรือ ปล่อยว่าง): ").strip()
+        if res_choice == "":
+            width, height = config.CAMERA_WIDTH, config.CAMERA_HEIGHT
+            break
+        elif res_choice == "1":
+            width, height = 640, 480
+            break
+        elif res_choice == "2":
+            width, height = 1280, 720
+            break
+        elif res_choice == "3":
+            width, height = 1920, 1080
+            break
+        elif res_choice == "4":
+            while True:
+                try:
+                    w_in = int(input("กรอกความกว้าง (Width เช่น 800): ").strip())
+                    h_in = int(input("กรอกความสูง (Height เช่น 600): ").strip())
+                    if w_in > 0 and h_in > 0:
+                        width, height = w_in, h_in
+                        break
+                    print("ความกว้างและความสูงต้องมากกว่า 0")
+                except ValueError:
+                    print("กรุณากรอกเฉพาะตัวเลขจำนวนเต็ม")
+            break
+        else:
+            print("ตัวเลือกไม่ถูกต้อง กรุณากรอก 1-4 หรือปล่อยว่าง")
+            
+    print(f"-> เลือกใช้กล้องหมายเลข: {camera_index} ที่ความละเอียด: {width}x{height}\n")
+    return camera_index, width, height
+
 def run_inference():
     print("=" * 50)
     print("[PREDICTION] ระบบตรวจจับการเสียการทรงตัว (Live Prediction)")
@@ -41,7 +100,10 @@ def run_inference():
 
     # 1. เรียกหน้าต่าง Popup ถามชื่อตั้งแต่เริ่มรันโปรแกรม
     tester_name = ask_tester_name("")
-    print(f"\nยินดีต้อนรับคุณ {tester_name} ระบบกำลังเปิดกล้อง...\n")
+    print(f"\nยินดีต้อนรับคุณ {tester_name}\n")
+    
+    # 1.1 ตั้งค่ากล้องและความละเอียดแบบไดนามิก
+    camera_index, cam_width, cam_height = prompt_camera_settings()
 
     print("กำลังโหลดโมเดล AI (ใช้เวลาสักครู่)...")
     try:
@@ -78,9 +140,9 @@ def run_inference():
 
     print("กำลังเชื่อมต่อกล้อง...")
 
-    cap = cv2.VideoCapture(config.CAMERA_INDEX)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
+    cap = cv2.VideoCapture(camera_index)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, cam_width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cam_height)
     time.sleep(1)  # หน่วงเวลา 1 วินาทีให้ฮาร์ดแวร์กล้องตั้งตัว
 
     window_name = config.MAIN_WINDOW_NAME

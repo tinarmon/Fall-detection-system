@@ -4,17 +4,22 @@ from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import config
 
+
 class PoseEstimator:
-    # Update default path
-    def __init__(self, model_path=config.POSE_TASK_PATH):
+    def __init__(self, model_path=config.POSE_TASK_PATH, min_detection_confidence=None, min_presence_confidence=None, min_tracking_confidence=None):
         base_options = python.BaseOptions(model_asset_path=model_path)
+        
+        det_conf = min_detection_confidence if min_detection_confidence is not None else config.MIN_DETECTION_CONFIDENCE
+        pres_conf = min_presence_confidence if min_presence_confidence is not None else config.MIN_PRESENCE_CONFIDENCE
+        track_conf = min_tracking_confidence if min_tracking_confidence is not None else config.MIN_TRACKING_CONFIDENCE
+        
         options = vision.PoseLandmarkerOptions(
             base_options=base_options,
             running_mode=vision.RunningMode.IMAGE,
             num_poses=1,
-            min_pose_detection_confidence=config.MIN_DETECTION_CONFIDENCE,
-            min_pose_presence_confidence=config.MIN_PRESENCE_CONFIDENCE,
-            min_tracking_confidence=config.MIN_TRACKING_CONFIDENCE
+            min_pose_detection_confidence=det_conf,
+            min_pose_presence_confidence=pres_conf,
+            min_tracking_confidence=track_conf
         )
         self.detector = vision.PoseLandmarker.create_from_options(options)
         self.TARGET_LANDMARKS = config.TARGET_LANDMARKS

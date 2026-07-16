@@ -81,6 +81,33 @@ def run_training():
     print("[TRAINING] เริ่มต้นการฝึกสอนโมเดล AI (Model Training Mode)")
     print("=" * 50)
 
+    print("\n💡 ข้อมูลเกี่ยวกับการกำหนดรอบฝึกสอน (Training Epochs):")
+    print("  - 1 Epoch = การที่โมเดลได้เรียนรู้ข้อมูลฝึกสอนครบถ้วนทุกชุดเป็นจำนวน 1 รอบ")
+    print("  - [รอบน้อยเกินไป (เช่น < 15 รอบ)]:")
+    print("    * ข้อดี: ฝึกสอนเร็ว ประหยัดเวลา")
+    print("    * ข้อเสีย: โมเดลอาจจะยังเรียนรู้แพทเทิร์นไม่เพียงพอ (Underfitting) ความแม่นยำต่ำ")
+    print("  - [รอบมากเกินไป (เช่น > 50 รอบ)]:")
+    print("    * ข้อดี: โมเดลมีโอกาสปรับตัวเข้ากับข้อมูลได้ดียิ่งขึ้น ความแม่นยำสูงขึ้น")
+    print("    * ข้อเสีย: ใช้เวลาประมวลผลนานขึ้น และอาจทำให้โมเดลจดจำข้อมูลเฉพาะชุดฝึกสอนมากเกินไป")
+    print("      จนไม่สามารถทำนายข้อมูลชุดใหม่ได้ถูกต้อง (Overfitting)")
+    print(f"  - ค่าเริ่มต้นปัจจุบันในระบบ: {config.EPOCHS} รอบ")
+    print("=" * 50)
+
+    while True:
+        epochs_input = input(f"ระบุจำนวนรอบฝึกสอน (Epochs) ที่ต้องการ (10-200, ปล่อยว่างเพื่อใช้ค่าเริ่มต้น {config.EPOCHS}): ").strip()
+        if epochs_input == "":
+            epochs = config.EPOCHS
+            break
+        try:
+            epochs = int(epochs_input)
+            if 10 <= epochs <= 200:
+                break
+            print("กรุณากรอกตัวเลขระหว่าง 10 ถึง 200 รอบ")
+        except ValueError:
+            print("กรุณากรอกเฉพาะตัวเลขจำนวนเต็มเท่านั้น")
+
+    print(f"-> กำหนดจำนวนรอบฝึกสอน (Epochs) = {epochs} รอบ\n")
+
     X_raw, y_raw = load_and_preprocess_data()
     if X_raw is None or y_raw is None:
         print("[ERROR] ไม่พบข้อมูลสำหรับฝึกสอน กรุณาสะสมข้อมูลก่อนเริ่มฝึกสอนโมเดล")
@@ -119,7 +146,7 @@ def run_training():
         model.fit(
             X_train,
             y_train,
-            epochs=EPOCHS,
+            epochs=epochs,
             batch_size=BATCH_SIZE,
             validation_split=0.2,
         )
