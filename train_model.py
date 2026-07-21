@@ -108,6 +108,32 @@ def run_training():
 
     print(f"-> กำหนดจำนวนรอบฝึกสอน (Epochs) = {epochs} รอบ\n")
 
+    print("💡 ข้อมูลเกี่ยวกับการแบ่งชุดข้อมูล (Dataset Split Ratio):")
+    print("  - ข้อมูลจะถูกแบ่งเป็น 2 ชุดคือ: ชุดฝึกสอน (Train Set) และ ชุดทดสอบ (Test Set)")
+    print("  - [สัดส่วนทดสอบต่ำ (เช่น 0.1 หรือ 10%)]:")
+    print("    * ข้อดี: มีข้อมูลป้อนสอนโมเดลเยอะขึ้น เหมาะสำหรับกรณีข้อมูลรวมมีน้อย")
+    print("    * ข้อเสีย: การวัดผลความแม่นยำอาจมีความผันผวนสูงและยากในการตรวจจับ Overfitting")
+    print("  - [สัดส่วนทดสอบสูง (เช่น 0.3 หรือ 30%)]:")
+    print("    * ข้อดี: การวัดผลตัวชี้วัดความแม่นยำมีความน่าเชื่อถือและเสถียรมากยิ่งขึ้น")
+    print("    * ข้อเสีย: เหลือปริมาณข้อมูลป้อนสอนโมเดลน้อยลง")
+    print("  - สัดส่วนมาตรฐานแนะนำคือ 0.2 (20% สำหรับใช้ทดสอบ, 80% สำหรับใช้สอน)")
+    print("=" * 50)
+
+    while True:
+        test_size_input = input("ระบุอัตราส่วนทดสอบ (Test Size) ที่ต้องการ (0.1 - 0.4, ปล่อยว่างเพื่อใช้ 0.2): ").strip()
+        if test_size_input == "":
+            test_size = 0.2
+            break
+        try:
+            test_size = float(test_size_input)
+            if 0.1 <= test_size <= 0.4:
+                break
+            print("กรุณากรอกตัวเลขทศนิยมระหว่าง 0.1 ถึง 0.4")
+        except ValueError:
+            print("กรุณากรอกเฉพาะตัวเลขทศนิยมเท่านั้น")
+
+    print(f"-> กำหนดสัดส่วนชุดทดสอบ (Test Size) = {test_size * 100:.0f}%\n")
+
     X_raw, y_raw = load_and_preprocess_data()
     if X_raw is None or y_raw is None:
         print("[ERROR] ไม่พบข้อมูลสำหรับฝึกสอน กรุณาสะสมข้อมูลก่อนเริ่มฝึกสอนโมเดล")
@@ -123,7 +149,7 @@ def run_training():
     print(f"จัดกลุ่มเป็น Sequence ละ {TIME_STEPS} เฟรม ได้ทั้งหมด: {len(X_seq)} ชุด")
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X_seq, y_seq, test_size=0.2, random_state=42, shuffle=False
+        X_seq, y_seq, test_size=test_size, random_state=42, shuffle=False
     )
 
     print("\n--- กำลังสร้างโมเดล GRU ---")
@@ -148,7 +174,7 @@ def run_training():
             y_train,
             epochs=epochs,
             batch_size=BATCH_SIZE,
-            validation_split=0.2,
+            validation_data=(X_test, y_test),
         )
     except Exception as e:
         print(f"[ERROR] เกิดข้อผิดพลาดขณะเทรนโมเดล: {e}")
