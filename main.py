@@ -17,6 +17,7 @@ try:
     from live_inference import run_inference
     from normalize_data import run_normalization
     from balance_dataset import run_dataset_balancing
+    from check_balance import check_dataset_balance
 except ImportError as e:
     print(f"[ERROR] Error importing core modules: {e}")
     sys.exit(1)
@@ -82,10 +83,11 @@ def main():
         print("[5] ตรวจสอบสถานะระบบ (Metadata Diagnostics)")
         print("[6] ทำความสะอาดและปรับปรุงข้อมูลดิบ (Clean & Normalize Data)")
         print("[7] ปรับสมดุลข้อมูลฝึกสอน (Balance Training Dataset)")
+        print("[8] ตรวจสอบสัดส่วนชุดข้อมูล (Check Dataset Balance)")
         print("[0] ออกจากโปรแกรม (Exit)")
         print("==================================================")
         
-        choice = input("ป้อนตัวเลือกของคุณ (0-7): ").strip()
+        choice = input("ป้อนตัวเลือกของคุณ (0-8): ").strip()
         
         if choice == "1":
             clear_screen()
@@ -136,12 +138,20 @@ def main():
             except Exception as e:
                 print(f"\n[ERROR] เกิดข้อผิดพลาดในการรันการปรับสมดุลข้อมูล: {e}")
                 input("กด Enter เพื่อกลับสู่เมนูหลัก...")
+        elif choice == "8":
+            clear_screen()
+            try:
+                check_dataset_balance()
+                input("กด Enter เพื่อกลับสู่เมนูหลัก...")
+            except Exception as e:
+                print(f"\n[ERROR] เกิดข้อผิดพลาดในการรันการตรวจสอบสัดส่วนข้อมูล: {e}")
+                input("กด Enter เพื่อกลับสู่เมนูหลัก...")
         elif choice == "0":
             clear_screen()
             print("ขอบคุณที่ใช้งานระบบตรวจจับก่อนการล้ม สวัสดีครับ")
             break
         else:
-            print("\n[WARNING] ตัวเลือกไม่ถูกต้อง กรุณากรอกตัวเลขระหว่าง 0 ถึง 7")
+            print("\n[WARNING] ตัวเลือกไม่ถูกต้อง กรุณากรอกตัวเลขระหว่าง 0 ถึง 8")
             input("กด Enter เพื่อเลือกใหม่...")
 
 if __name__ == "__main__":

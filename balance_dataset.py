@@ -116,6 +116,7 @@ def run_dataset_balancing():
     
     normal_frames = 0
     fall_frames = 0
+    normal_sessions = []
     fall_sessions = []
     
     for f in csv_files:
@@ -129,6 +130,8 @@ def run_dataset_balancing():
             normal_frames += n_norm
             fall_frames += n_fall
             
+            if n_norm > 0:
+                normal_sessions.append((f, df))
             if n_fall > 0:
                 fall_sessions.append((f, df))
         except Exception as e:
@@ -138,38 +141,51 @@ def run_dataset_balancing():
     print(f"   - เฟรมปกติ (Normal - Label 0): {normal_frames} เฟรม")
     print(f"   - เฟรมล้ม (Fall - Label 1)   : {fall_frames} เฟรม")
     
-    if normal_frames == 0:
-        print("[ERROR] ไม่มีข้อมูลปกติ (Label 0) เลยในระบบ ไม่สามารถสร้างความสมดุลได้")
+    if normal_frames == 0 and fall_frames == 0:
+        print("[ERROR] ไม่มีข้อมูลในระบบเลย ไม่สามารถดำเนินการได้")
         input("กด Enter เพื่อกลับสู่เมนูหลัก...")
         return
         
-    ratio = fall_frames / normal_frames
-    print(f"   - อัตราส่วนความล้มเหลว (Ratio) : {ratio * 100:.2f}% ของข้อมูลทั้งหมด")
+    # ตัดสินหาคลาสส่วนน้อย (Minority Class)
+    if normal_frames > fall_frames:
+        minority_class = 1
+        minority_name = "ล้ม (Fall - Label 1)"
+        majority_name = "ปกติ (Normal - Label 0)"
+        ratio = fall_frames / normal_frames if normal_frames > 0 else 0
+        needed_frames = int(normal_frames * 0.90) - fall_frames
+        target_sessions = fall_sessions
+    elif fall_frames > normal_frames:
+        minority_class = 0
+        minority_name = "ปกติ (Normal - Label 0)"
+        majority_name = "ล้ม (Fall - Label 1)"
+        ratio = normal_frames / fall_frames if fall_frames > 0 else 0
+        needed_frames = int(fall_frames * 0.90) - normal_frames
+        target_sessions = normal_sessions
+    else:
+        ratio = 1.0
+        needed_frames = 0
+        target_sessions = []
+        
+    print(f"   - อัตราส่วนความสมดุลปัจจุบัน : {ratio * 100:.2f}% (เทียบกับคลาสส่วนใหญ่: {majority_name})")
     
     if ratio >= 0.85:
-        print("[OK] ชุดข้อมูลสมดุลดีอยู่แล้ว (มีข้อมูลล้มอย่างน้อย 85% ของข้อมูลปกติ) ไม่จำเป็นต้องสร้าง mockup เพิ่ม")
+        print("[OK] ชุดข้อมูลสมดุลดีอยู่แล้ว (คลาสทั้งสองมีสัดส่วนห่างกันไม่เกิน 15%) ไม่จำเป็นต้องสร้าง mockup เพิ่ม")
         input("กด Enter เพื่อกลับสู่เมนูหลัก...")
         return
         
-    if not fall_sessions:
-        print("[WARNING] ❌ ไม่พบเซสชันการล้ม (Label 1) ใดๆ ในระบบ ไม่สามารถทำ Augmentation ได้")
+    if not target_sessions:
+        print(f"[WARNING] ❌ ไม่พบเซสชันต้นแบบของคลาสที่ขาดแคลน ({minority_name}) ในระบบ ไม่สามารถทำ Augmentation ได้")
         input("กด Enter เพื่อกลับสู่เมนูหลัก...")
         return
         
-    # คำนวณจำนวนข้อมูลที่ต้องเพิ่มขึ้น
-    target_fall_frames = int(normal_frames * 0.90)  # ตั้งเป้าให้ได้ความสมดุล 90%
-    needed_fall_frames = target_fall_frames - fall_frames
-    
-    print(f"\n📢 กำลังเริ่มกระบวนการสุ่มจำลองข้อมูลการล้ม (Augmenting Falls)...")
-    print(f"   - เป้าหมายสร้างเฟรมล้มจำลองเพิ่ม: ~{needed_fall_frames} เฟรม")
+    print(f"\n📢 กำลังเริ่มกระบวนการสุ่มจำลองข้อมูลสำหรับคลาสที่ขาดแคลน ({minority_name})...")
+    print(f"   - เป้าหมายสร้างเฟรมจำลองเพิ่ม: ~{needed_frames} เฟรม")
     
     generated_files = 0
     generated_frames = 0
     
-    # สุ่มดึงเซสชันการล้มและนำมาผ่านกระบวนการแปรรูปจนกว่าความสมดุลจะครบถ้วน
-    while generated_frames < needed_fall_frames:
-        # สุ่มหยิบไฟล์เซสชันการล้มที่มีอยู่
-        fpath, df_orig = random.choice(fall_sessions)
+    while generated_frames < needed_frames:
+        fpath, df_orig = random.choice(target_sessions)
         filename = os.path.basename(fpath)
         base_name = os.path.splitext(filename)[0]
         
@@ -188,14 +204,13 @@ def run_dataset_balancing():
         
         df_aug.to_csv(new_filepath, index=False)
         
-        n_fall_added = (df_aug['label'] == 1).sum()
-        generated_frames += n_fall_added
+        n_added = (df_aug['label'] == minority_class).sum()
+        generated_frames += n_added
         
     print("\n" + "=" * 50)
     print("🎉 ปรับสมดุลชุดข้อมูลฝึกสอนเสร็จสิ้น!")
-    print(f"   - สร้างไฟล์จำลองล้มใหม่: {generated_files} ไฟล์")
-    print(f"   - เพิ่มเฟรมล้มจำลอง (Oversampled) : {generated_frames} เฟรม")
-    print(f"   - สัดส่วนรวมของเฟรมล้มหลังทำเสร็จ: {fall_frames + generated_frames} เฟรม (สมดุลกับปกติ {normal_frames} เฟรม)")
+    print(f"   - สร้างไฟล์จำลองสำเร็จ: {generated_files} ไฟล์")
+    print(f"   - เพิ่มเฟรมของคลาส {minority_name} จำลองสำเร็จ: {generated_frames} เฟรม")
     print("=" * 50)
     
     input("กด Enter เพื่อกลับสู่เมนูหลัก...")
