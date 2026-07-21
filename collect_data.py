@@ -106,7 +106,7 @@ def run_bulk_collection(directory_path, subject_id, label_mode, default_label, e
         
         header = ['timestamp', 'subject_id', 'input_source', 'label', 'left_angle', 'right_angle']
         for target in config.TARGET_LANDMARKS:
-            header.extend([f'x{target}', f'y{target}'])
+            header.extend([f'x{target}', f'y{target}', f'z{target}'])
             
         frame_buffer = []
         frame_idx = 0
@@ -120,22 +120,22 @@ def run_bulk_collection(directory_path, subject_id, label_mode, default_label, e
                 break
                 
             frame_idx += 1
-            _, points_px, points_norm = estimator.process_frame(frame)
+            _, points_px, points_norm, points_world = estimator.process_frame(frame)
             
             left_angle, right_angle = 0.0, 0.0
             is_valid_pose = False
             
             if points_px:
-                if all(k in points_px for k in config.TARGET_LANDMARKS):
+                if all(k in points_px for k in config.TARGET_LANDMARKS) and all(k in points_world for k in config.TARGET_LANDMARKS):
                     is_valid_pose = True
-                    left_angle = calculator.calculate_angle(points_px[11], points_px[23], points_px[25])
-                    right_angle = calculator.calculate_angle(points_px[12], points_px[24], points_px[26])
+                    left_angle = calculator.calculate_angle_3d(points_world[11], points_world[23], points_world[25])
+                    right_angle = calculator.calculate_angle_3d(points_world[12], points_world[24], points_world[26])
                     
             if is_valid_pose:
                 row_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                 row_data = [row_timestamp, subject_id, filename, label, left_angle / 180.0, right_angle / 180.0]
-                for target in config.TARGET_LANDMARKS:
-                    row_data.extend([points_norm[target][0], points_norm[target][1]])
+                rel_features = estimator.get_relative_features(points_norm)
+                row_data.extend(rel_features)
                 frame_buffer.append(row_data)
                 
             if frame_idx % 50 == 0 or frame_idx == total_frames:
@@ -270,7 +270,7 @@ def run_collection():
 
     header = ['timestamp', 'subject_id', 'input_source', 'label', 'left_angle', 'right_angle']
     for target in config.TARGET_LANDMARKS:
-        header.extend([f'x{target}', f'y{target}'])
+        header.extend([f'x{target}', f'y{target}', f'z{target}'])
 
     # Atomic Buffer ในแรม
     frame_buffer = []
@@ -298,16 +298,16 @@ def run_collection():
                 break
             
             frame_idx += 1
-            processed_frame, points_px, points_norm = estimator.process_frame(frame)
+            processed_frame, points_px, points_norm, points_world = estimator.process_frame(frame)
             
             left_angle, right_angle = 0.0, 0.0
             is_valid_pose = False
 
             if points_px:
-                if all(k in points_px for k in config.TARGET_LANDMARKS):
+                if all(k in points_px for k in config.TARGET_LANDMARKS) and all(k in points_world for k in config.TARGET_LANDMARKS):
                     is_valid_pose = True
-                    left_angle = calculator.calculate_angle(points_px[11], points_px[23], points_px[25])
-                    right_angle = calculator.calculate_angle(points_px[12], points_px[24], points_px[26])
+                    left_angle = calculator.calculate_angle_3d(points_world[11], points_world[23], points_world[25])
+                    right_angle = calculator.calculate_angle_3d(points_world[12], points_world[24], points_world[26])
                     
                     cv2.putText(processed_frame, f"L:{int(left_angle)}", (points_px[23][0]+20, points_px[23][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
                     cv2.putText(processed_frame, f"R:{int(right_angle)}", (points_px[24][0]-80, points_px[24][1]), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2)
@@ -333,8 +333,8 @@ def run_collection():
                     if is_valid_pose:
                         row_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                         row_data = [row_timestamp, subject_id, input_source, 0, left_angle / 180.0, right_angle / 180.0]
-                        for target in config.TARGET_LANDMARKS:
-                            row_data.extend([points_norm[target][0], points_norm[target][1]])
+                        rel_features = estimator.get_relative_features(points_norm)
+                        row_data.extend(rel_features)
                         frame_buffer.append(row_data)
 
                 elif current_mode == "FALL":
@@ -343,8 +343,8 @@ def run_collection():
                     if is_valid_pose:
                         row_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                         row_data = [row_timestamp, subject_id, input_source, 1, left_angle / 180.0, right_angle / 180.0]
-                        for target in config.TARGET_LANDMARKS:
-                            row_data.extend([points_norm[target][0], points_norm[target][1]])
+                        rel_features = estimator.get_relative_features(points_norm)
+                        row_data.extend(rel_features)
                         frame_buffer.append(row_data)
             else:
                 if key == ord('p') or key == ord('ย') or key == 32:
@@ -361,8 +361,8 @@ def run_collection():
                     if is_valid_pose:
                         row_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                         row_data = [row_timestamp, subject_id, input_source, global_label, left_angle / 180.0, right_angle / 180.0]
-                        for target in config.TARGET_LANDMARKS:
-                            row_data.extend([points_norm[target][0], points_norm[target][1]])
+                        rel_features = estimator.get_relative_features(points_norm)
+                        row_data.extend(rel_features)
                         frame_buffer.append(row_data)
                 else:
                     status_text = f"PAUSED Playback: {frame_idx}/{total_frames}"

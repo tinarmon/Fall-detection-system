@@ -20,7 +20,7 @@ def jitter_coordinates(df, sigma=config.JITTER_SIGMA):
     df_aug = df.copy()
     landmark_cols = []
     for target in config.TARGET_LANDMARKS:
-        landmark_cols.extend([f'x{target}', f'y{target}'])
+        landmark_cols.extend([f'x{target}', f'y{target}', f'z{target}'])
         
     noise = np.random.normal(0, sigma, size=(len(df_aug), len(landmark_cols)))
     df_aug[landmark_cols] = df_aug[landmark_cols] + noise
@@ -37,10 +37,12 @@ def translate_coordinates(df, max_translation=config.TRANSLATION_RANGE):
     df_aug = df.copy()
     dx = random.uniform(-max_translation, max_translation)
     dy = random.uniform(-max_translation, max_translation)
+    dz = random.uniform(-max_translation, max_translation)
     
     for target in config.TARGET_LANDMARKS:
         df_aug[f'x{target}'] = (df_aug[f'x{target}'] + dx).clip(0.0, 1.0)
         df_aug[f'y{target}'] = (df_aug[f'y{target}'] + dy).clip(0.0, 1.0)
+        df_aug[f'z{target}'] = (df_aug[f'z{target}'] + dz).clip(0.0, 1.0)
         
     return df_aug
 
@@ -55,16 +57,18 @@ def scale_coordinates(df, max_scale=config.SCALE_RANGE):
     # คำนวณจุดกึ่งกลางสะโพกต่อเฟรม
     cx = (df['x23'] + df['x24']) / 2.0
     cy = (df['y23'] + df['y24']) / 2.0
+    cz = (df['z23'] + df['z24']) / 2.0
     
     for target in config.TARGET_LANDMARKS:
         df_aug[f'x{target}'] = (cx + scale * (df_aug[f'x{target}'] - cx)).clip(0.0, 1.0)
         df_aug[f'y{target}'] = (cy + scale * (df_aug[f'y{target}'] - cy)).clip(0.0, 1.0)
+        df_aug[f'z{target}'] = (cz + scale * (df_aug[f'z{target}'] - cz)).clip(0.0, 1.0)
         
     return df_aug
 
 def recalculate_angles(df):
     """
-    คำนวณมุมองศา left_angle และ right_angle ใหม่จากพิกัดที่มีการแปรรูปแล้ว
+    คำนวณมุมองศา left_angle และ right_angle ใหม่จากพิกัดที่มีการแปรรูปแล้ว ในแบบ 3 มิติ
     """
     w = config.CAMERA_WIDTH
     h = config.CAMERA_HEIGHT
@@ -72,16 +76,16 @@ def recalculate_angles(df):
     
     for idx, row in df.iterrows():
         # ไหล่ 11, สะโพก 23, เข่า 25
-        p11 = (row['x11'] * w, row['y11'] * h)
-        p23 = (row['x23'] * w, row['y23'] * h)
-        p25 = (row['x25'] * w, row['y25'] * h)
-        df.at[idx, 'left_angle'] = calculator.calculate_angle(p11, p23, p25) / 180.0
+        p11 = (row['x11'] * w, row['y11'] * h, row['z11'] * w)
+        p23 = (row['x23'] * w, row['y23'] * h, row['z23'] * w)
+        p25 = (row['x25'] * w, row['y25'] * h, row['z25'] * w)
+        df.at[idx, 'left_angle'] = calculator.calculate_angle_3d(p11, p23, p25) / 180.0
         
         # ไหล่ 12, สะโพก 24, เข่า 26
-        p12 = (row['x12'] * w, row['y12'] * h)
-        p24 = (row['x24'] * w, row['y24'] * h)
-        p26 = (row['x26'] * w, row['y26'] * h)
-        df.at[idx, 'right_angle'] = calculator.calculate_angle(p12, p24, p26) / 180.0
+        p12 = (row['x12'] * w, row['y12'] * h, row['z12'] * w)
+        p24 = (row['x24'] * w, row['y24'] * h, row['z24'] * w)
+        p26 = (row['x26'] * w, row['y26'] * h, row['z26'] * w)
+        df.at[idx, 'right_angle'] = calculator.calculate_angle_3d(p12, p24, p26) / 180.0
 
 def run_dataset_balancing():
     print("=" * 50)

@@ -135,7 +135,7 @@ def run_inference():
     if not file_exists:
         header = ["tester_name", "predicted_label", "left_angle", "right_angle"]
         for target in config.TARGET_LANDMARKS:
-            header.extend([f"x{target}", f"y{target}"])
+            header.extend([f"x{target}", f"y{target}", f"z{target}"])
         writer.writerow(header)
 
     print("กำลังเชื่อมต่อกล้อง...")
@@ -164,7 +164,7 @@ def run_inference():
             fps = 1 / (curr_time - prev_time) if (curr_time - prev_time) > 0 else 30
             prev_time = curr_time
 
-            processed_frame, points_px, points_norm = estimator.process_frame(frame)
+            processed_frame, points_px, points_norm, points_world = estimator.process_frame(frame)
 
             if processed_frame is None or processed_frame.size == 0:
                 processed_frame = frame.copy()
@@ -182,13 +182,13 @@ def run_inference():
                 min_y, max_y = max(0, min(ys) - 100), min(h, max(ys) + 50)
                 bbox = (min_x, min_y, max_x, max_y)
 
-                if all(k in points_px for k in config.TARGET_LANDMARKS):
+                if all(k in points_px for k in config.TARGET_LANDMARKS) and all(k in points_world for k in config.TARGET_LANDMARKS):
                     is_valid_pose = True
-                    left_angle = calculator.calculate_angle(
-                        points_px[11], points_px[23], points_px[25]
+                    left_angle = calculator.calculate_angle_3d(
+                        points_world[11], points_world[23], points_world[25]
                     )
-                    right_angle = calculator.calculate_angle(
-                        points_px[12], points_px[24], points_px[26]
+                    right_angle = calculator.calculate_angle_3d(
+                        points_world[12], points_world[24], points_world[26]
                     )
 
             prediction = 0.0
@@ -197,8 +197,8 @@ def run_inference():
 
             if is_valid_pose:
                 features = [left_angle / 180.0, right_angle / 180.0]
-                for target in config.TARGET_LANDMARKS:
-                    features.extend([points_norm[target][0], points_norm[target][1]])
+                rel_features = estimator.get_relative_features(points_norm)
+                features.extend(rel_features)
 
                 sequence_buffer.append(features)
 

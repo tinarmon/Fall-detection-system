@@ -60,7 +60,7 @@ def detect_outliers(df, jump_threshold=config.JUMP_THRESHOLD, distance_threshold
 
 def recalculate_angles(df):
     """
-    คำนวณมุมซ้ายและขวาใหม่จากพิกัดที่มีการปรับเรียบแล้ว
+    คำนวณมุมซ้ายและขวาใหม่จากพิกัดที่มีการปรับเรียบแล้ว ในแบบ 3 มิติ
     """
     w = config.CAMERA_WIDTH
     h = config.CAMERA_HEIGHT
@@ -68,16 +68,16 @@ def recalculate_angles(df):
     
     for idx, row in df.iterrows():
         # มุมฝั่งซ้าย (ไหล่ 11, สะโพก 23, เข่า 25)
-        p11 = (row['x11'] * w, row['y11'] * h)
-        p23 = (row['x23'] * w, row['y23'] * h)
-        p25 = (row['x25'] * w, row['y25'] * h)
-        df.at[idx, 'left_angle'] = calculator.calculate_angle(p11, p23, p25) / 180.0
+        p11 = (row['x11'] * w, row['y11'] * h, row['z11'] * w)
+        p23 = (row['x23'] * w, row['y23'] * h, row['z23'] * w)
+        p25 = (row['x25'] * w, row['y25'] * h, row['z25'] * w)
+        df.at[idx, 'left_angle'] = calculator.calculate_angle_3d(p11, p23, p25) / 180.0
         
         # มุมฝั่งขวา (ไหล่ 12, สะโพก 24, เข่า 26)
-        p12 = (row['x12'] * w, row['y12'] * h)
-        p24 = (row['x24'] * w, row['y24'] * h)
-        p26 = (row['x26'] * w, row['y26'] * h)
-        df.at[idx, 'right_angle'] = calculator.calculate_angle(p12, p24, p26) / 180.0
+        p12 = (row['x12'] * w, row['y12'] * h, row['z12'] * w)
+        p24 = (row['x24'] * w, row['y24'] * h, row['z24'] * w)
+        p26 = (row['x26'] * w, row['y26'] * h, row['z26'] * w)
+        df.at[idx, 'right_angle'] = calculator.calculate_angle_3d(p12, p24, p26) / 180.0
 
 def clean_session_file(filepath, output_dir):
     """
@@ -91,7 +91,11 @@ def clean_session_file(filepath, output_dir):
         return False, 0
     
     # ตรวจสอบโครงสร้างคอลัมน์สะโพกที่ต้องใช้หาพิกัด centroid
-    required_cols = ['x23', 'y23', 'x24', 'y24', 'x11', 'y11', 'x12', 'y12', 'x25', 'y25', 'x26', 'y26']
+    required_cols = [
+        'x23', 'y23', 'z23', 'x24', 'y24', 'z24',
+        'x11', 'y11', 'z11', 'x12', 'y12', 'z12',
+        'x25', 'y25', 'z25', 'x26', 'y26', 'z26'
+    ]
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         print(f"[ERROR] โครงสร้างไฟล์ '{filename}' ไม่ถูกต้อง ขาดคอลัมน์: {missing_cols}")
@@ -108,7 +112,7 @@ def clean_session_file(filepath, output_dir):
         # ระบุคอลัมน์พิกัดทั้งหมดที่จะแก้ไข
         landmark_cols = []
         for target in config.TARGET_LANDMARKS:
-            landmark_cols.extend([f'x{target}', f'y{target}'])
+            landmark_cols.extend([f'x{target}', f'y{target}', f'z{target}'])
             
         # 1. กำหนดค่าของ Outlier ให้เป็น NaN เพื่อนำไปอินเทอร์โพเลตต่อ
         df.loc[is_outlier, landmark_cols] = np.nan
