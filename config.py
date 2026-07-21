@@ -64,3 +64,10 @@ COLOR_TEXT = (255, 255, 255)    # White
 JUMP_THRESHOLD = 0.15           # Horizontal centroid jump threshold to detect subject swaps
 OUTLIER_DISTANCE_THRESHOLD = 0.20 # Max horizontal distance from global median centroid
 MIN_OUTLIER_RUN = 3             # Min frames of a swap to clean
+
+# ==========================================
+# 📊 DATA AUGMENTATION & BALANCING SETTINGS
+# ==========================================
+JITTER_SIGMA = 0.005            # Standard deviation for random Gaussian noise (jitter)
+TRANSLATION_RANGE = 0.05        # Maximum horizontal/vertical offset translation (5% of screen width/height)
+SCALE_RANGE = 0.05              # Maximum scaling factor offset (e.g. scale in [0.95, 1.05])
