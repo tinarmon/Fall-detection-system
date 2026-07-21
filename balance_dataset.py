@@ -25,26 +25,17 @@ def jitter_coordinates(df, sigma=config.JITTER_SIGMA):
     noise = np.random.normal(0, sigma, size=(len(df_aug), len(landmark_cols)))
     df_aug[landmark_cols] = df_aug[landmark_cols] + noise
     
-    # Clip พิกัดให้อยู่ในช่วง 0.0 - 1.0 เสมอ
-    df_aug[landmark_cols] = df_aug[landmark_cols].clip(0.0, 1.0)
+    # สำหรับพิกัด Relative ที่มีค่าติดลบได้ เราไม่สามารถใช้ .clip(0.0, 1.0) ได้
+    # จึงทำการเอาการ Clip ออกเพื่อให้ข้อมูลโครงร่าง 3D อยู่ในสภาพปกติ
     return df_aug
 
 def translate_coordinates(df, max_translation=config.TRANSLATION_RANGE):
     """
-    เลื่อนพิกัดของร่างกายทั้งหมดในระนาบระนาบ/แนวดิ่ง (Translation)
-    เพื่อจำลองตำแหน่งตัวแบบที่ต่างกันในกล้อง
+    สำหรับ Relative Coordinates จุดสะโพกจะถูกฟิกซ์ที่จุดกำเนิด (0,0,0) ตลอดเวลา
+    ดังนั้นการเลื่อนตำแหน่งภาพ (Translation) จะไม่มีผลใดๆ ต่อข้อมูลสัมพัทธ์
+    จึงข้ามการเลื่อนตำแหน่งเพื่อคงความสมบูรณ์ของจุดศูนย์กลางสะโพกไว้
     """
-    df_aug = df.copy()
-    dx = random.uniform(-max_translation, max_translation)
-    dy = random.uniform(-max_translation, max_translation)
-    dz = random.uniform(-max_translation, max_translation)
-    
-    for target in config.TARGET_LANDMARKS:
-        df_aug[f'x{target}'] = (df_aug[f'x{target}'] + dx).clip(0.0, 1.0)
-        df_aug[f'y{target}'] = (df_aug[f'y{target}'] + dy).clip(0.0, 1.0)
-        df_aug[f'z{target}'] = (df_aug[f'z{target}'] + dz).clip(0.0, 1.0)
-        
-    return df_aug
+    return df.copy()
 
 def scale_coordinates(df, max_scale=config.SCALE_RANGE):
     """
@@ -54,15 +45,15 @@ def scale_coordinates(df, max_scale=config.SCALE_RANGE):
     df_aug = df.copy()
     scale = random.uniform(1.0 - max_scale, 1.0 + max_scale)
     
-    # คำนวณจุดกึ่งกลางสะโพกต่อเฟรม
+    # คำนวณจุดกึ่งกลางสะโพกต่อเฟรม (ซึ่งปกติเป็น 0.0 สำหรับ Relative Coordinates)
     cx = (df['x23'] + df['x24']) / 2.0
     cy = (df['y23'] + df['y24']) / 2.0
     cz = (df['z23'] + df['z24']) / 2.0
     
     for target in config.TARGET_LANDMARKS:
-        df_aug[f'x{target}'] = (cx + scale * (df_aug[f'x{target}'] - cx)).clip(0.0, 1.0)
-        df_aug[f'y{target}'] = (cy + scale * (df_aug[f'y{target}'] - cy)).clip(0.0, 1.0)
-        df_aug[f'z{target}'] = (cz + scale * (df_aug[f'z{target}'] - cz)).clip(0.0, 1.0)
+        df_aug[f'x{target}'] = cx + scale * (df_aug[f'x{target}'] - cx)
+        df_aug[f'y{target}'] = cy + scale * (df_aug[f'y{target}'] - cy)
+        df_aug[f'z{target}'] = cz + scale * (df_aug[f'z{target}'] - cz)
         
     return df_aug
 
