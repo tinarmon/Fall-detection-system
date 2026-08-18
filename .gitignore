@@ -6,3 +6,4 @@ client_config.json
 __pycache__/
 *.pyc
 payload.zip
+.agents/
