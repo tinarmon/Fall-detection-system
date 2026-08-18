@@ -48,7 +48,7 @@ def build():
             [
                 sys.executable, "-m", "PyInstaller", "main.py", 
                 "--name=DPDF", "--onedir", "--noconsole", "--clean",
-                "--add-data=assets;assets"
+                "--add-data=assets;assets", "--icon=assets/icon.ico"
             ],
             check=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
@@ -119,7 +119,7 @@ def build():
             [
                 sys.executable, "-m", "PyInstaller", "setup_gui.py", 
                 "--name=DPDF_Setup", "--onefile", "--noconsole", 
-                f"--add-data={zip_path};.", "--clean"
+                f"--add-data={zip_path};.", "--clean", "--icon=assets/icon.ico"
             ],
             check=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
