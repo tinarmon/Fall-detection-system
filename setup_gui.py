@@ -22,6 +22,14 @@ class InstallerApp(tk.Tk):
             
         self.zip_path = os.path.join(self.base_path, "payload.zip")
         
+        # Load icon if it exists
+        icon_path = os.path.join(self.base_path, "assets", "icon.png")
+        if os.path.exists(icon_path):
+            try:
+                self.iconphoto(True, tk.PhotoImage(file=icon_path))
+            except Exception:
+                pass
+        
         # Default Install Path
         user_profile = os.environ.get("USERPROFILE", "C:\\")
         self.default_path = os.path.join(user_profile, "AppData", "Local", "Programs", "DPDF")
@@ -180,6 +188,7 @@ class InstallerApp(tk.Tk):
             f'$Shortcut = $WshShell.CreateShortcut("{shortcut_path}"); '
             f'$Shortcut.TargetPath = "{target_exe}"; '
             f'$Shortcut.WorkingDirectory = "{os.path.dirname(target_exe)}"; '
+            f'$Shortcut.IconLocation = "{target_exe},0"; '
             f'$Shortcut.Save()'
         )
         try:

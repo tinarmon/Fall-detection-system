@@ -82,7 +82,8 @@ def load_trained_model():
     return False
 
 class CameraStream:
-    def __init__(self, name, source, width=640, height=480):
+    def __init__(self, app, name, source, width=640, height=480):
+        self.app = app
         self.name = name
         self.source = source
         self.width = width
@@ -180,7 +181,7 @@ class CameraStream:
                     with model_lock:
                         pred_val = shared_model.predict(input_data, verbose=0)[0][0]
                     prediction = float(pred_val)
-                    if prediction > config.FALL_THRESHOLD:
+                    if prediction > self.app.fall_threshold:
                         status_text = "FALL DETECTED"
                         theme_color = (0, 0, 255)
                             
@@ -211,8 +212,20 @@ class App(tk.Tk):
         self.geometry("1200x800")
         self.configure(bg="#0c0c0e")
         
+        # Load window icon
+        icon_path = os.path.join(config.BASE_DIR, "assets", "icon.png")
+        if os.path.exists(icon_path):
+            try:
+                self.iconphoto(True, tk.PhotoImage(file=icon_path))
+            except Exception:
+                pass
+                
         self.global_line_token = ""
         self.last_line_notify_time = {}
+        self.fall_threshold = 0.6
+        self.line_cooldown = 60
+        self.audio_alert_enabled = True
+        self.last_audio_alert_time = 0.0
         
         # Load config
         self.config_path = os.path.join(config.BASE_DIR, "client_config.json")
@@ -256,6 +269,13 @@ class App(tk.Tk):
         )
         btn_help.pack(side="right")
         
+        btn_settings = tk.Button(
+            header_frame, text="⚙️ ตั้งค่าระบบ", font=("Segoe UI", 9, "bold"), 
+            bg="#1e1e24", fg="#f0f0f5", activebackground="#2a2a35", activeforeground="#ffffff", 
+            bd=0, padx=12, pady=5, command=self.open_global_settings
+        )
+        btn_settings.pack(side="right", padx=(0, 10))
+        
         # Grid container
         self.grid_container = ttk.Frame(self.workspace)
         self.grid_container.pack(fill="both", expand=True)
@@ -297,6 +317,77 @@ class App(tk.Tk):
         self.alert_banner.pack(fill="x", side="bottom", pady=(5, 0))
         
         self.rebuild_grid_view()
+
+    def open_global_settings(self):
+        modal = tk.Toplevel(self)
+        modal.title("Global System Settings")
+        modal.geometry("380x320")
+        modal.configure(bg="#0c0c0e")
+        modal.transient(self)
+        modal.grab_set()
+        modal.resizable(False, False)
+        
+        # Load window icon for settings dialog
+        icon_path = os.path.join(config.BASE_DIR, "assets", "icon.png")
+        if os.path.exists(icon_path):
+            try:
+                modal.iconphoto(True, tk.PhotoImage(file=icon_path))
+            except Exception:
+                pass
+                
+        # 1. Fall Threshold (Sensitivity Slider)
+        tk.Label(modal, text="AI Fall Detection Threshold (0.1 - 0.9):", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=20, pady=(20, 2))
+        
+        threshold_frame = ttk.Frame(modal)
+        threshold_frame.pack(fill="x", padx=20, pady=2)
+        
+        self.lbl_threshold_val = tk.Label(threshold_frame, text=f"{self.fall_threshold:.2f}", font=("Segoe UI", 9, "bold"), bg="#0c0c0e", fg="#00f0ff", width=6)
+        self.lbl_threshold_val.pack(side="right")
+        
+        def on_slider_move(val):
+            self.lbl_threshold_val.configure(text=f"{float(val):.2f}")
+            
+        slider = tk.Scale(
+            threshold_frame, from_=0.1, to=0.9, resolution=0.05, orient="horizontal", 
+            bg="#0c0c0e", fg="#ffffff", highlightthickness=0, activebackground="#00f0ff", 
+            command=on_slider_move
+        )
+        slider.set(self.fall_threshold)
+        slider.pack(side="left", fill="x", expand=True)
+        
+        # 2. LINE Cooldown Time (Spinbox)
+        tk.Label(modal, text="LINE Alert Cooldown (seconds):", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=20, pady=(15, 2))
+        
+        sp_cooldown = tk.Spinbox(modal, from_=10, to=300, increment=10, bg="#16161e", fg="#ffffff", bd=1, insertbackground="#ffffff")
+        sp_cooldown.delete(0, "end")
+        sp_cooldown.insert(0, str(self.line_cooldown))
+        sp_cooldown.pack(fill="x", padx=20, pady=2)
+        
+        # 3. Audio Alarm (Checkbox)
+        chk_val = tk.BooleanVar(value=self.audio_alert_enabled)
+        chk_audio = tk.Checkbutton(
+            modal, text="Enable Local Beep Alarm on Fall Detection", variable=chk_val, 
+            bg="#0c0c0e", fg="#f0f0f5", selectcolor="#16161e", activebackground="#0c0c0e", activeforeground="#ffffff"
+        )
+        chk_audio.pack(anchor="w", padx=20, pady=15)
+        
+        # Save Settings
+        def do_save():
+            try:
+                self.fall_threshold = float(slider.get())
+                self.line_cooldown = int(sp_cooldown.get())
+                self.audio_alert_enabled = bool(chk_val.get())
+                self.save_camera_config()
+                modal.destroy()
+                messagebox.showinfo("Settings Saved", "บันทึกการตั้งค่าระบบเรียบร้อยแล้ว!")
+            except Exception as ex:
+                messagebox.showerror("Error", f"ข้อมูลไม่ถูกต้อง: {ex}")
+                
+        btn_save = tk.Button(
+            modal, text="Save System Settings", font=("Segoe UI", 9, "bold"), bg="#00f0ff", fg="#000000", bd=0, pady=8,
+            command=do_save
+        )
+        btn_save.pack(fill="x", padx=20, pady=10)
 
     def show_main_help(self):
         msg = (
@@ -493,7 +584,7 @@ class App(tk.Tk):
         self.rebuild_grid_view()
         
         # Restart stream
-        stream = CameraStream(name, source)
+        stream = CameraStream(self, name, source)
         self.active_streams[name] = stream
         stream.start()
 
@@ -501,7 +592,7 @@ class App(tk.Tk):
         new_idx = len(self.camera_configs)
         if new_idx >= 4:
             return
-        self.camera_configs.append({"name": f"Camera {new_idx+1}", "source": "0"})
+        self.camera_configs.append({"name": f"Camera {new_idx+1}", "source": "0", "line_token": ""})
         self.save_camera_config()
         self.rebuild_grid_view()
 
@@ -522,7 +613,7 @@ class App(tk.Tk):
         for cfg in self.camera_configs:
             name = cfg["name"]
             source = cfg["source"]
-            stream = CameraStream(name, source)
+            stream = CameraStream(self, name, source)
             self.active_streams[name] = stream
             stream.start()
 
@@ -534,6 +625,9 @@ class App(tk.Tk):
     def save_camera_config(self):
         config_data = {
             "global_line_token": self.global_line_token,
+            "fall_threshold": self.fall_threshold,
+            "line_cooldown": self.line_cooldown,
+            "audio_alert_enabled": self.audio_alert_enabled,
             "cameras": [{"name": c["name"], "source": c["source"], "line_token": c.get("line_token", "")} for c in self.camera_configs]
         }
         try:
@@ -544,6 +638,9 @@ class App(tk.Tk):
 
     def load_camera_config(self):
         self.global_line_token = ""
+        self.fall_threshold = 0.6
+        self.line_cooldown = 60
+        self.audio_alert_enabled = True
         default_cameras = [{"name": "Webcam 3D", "source": "0", "line_token": ""}]
         if os.path.exists(self.config_path):
             try:
@@ -551,6 +648,9 @@ class App(tk.Tk):
                     data = json.load(f)
                     if isinstance(data, dict):
                         self.global_line_token = data.get("global_line_token", "")
+                        self.fall_threshold = data.get("fall_threshold", 0.6)
+                        self.line_cooldown = data.get("line_cooldown", 60)
+                        self.audio_alert_enabled = data.get("audio_alert_enabled", True)
                         return data.get("cameras", default_cameras)
                     elif isinstance(data, list):
                         # Backward compatibility for old list-only config format
@@ -588,7 +688,7 @@ class App(tk.Tk):
                     # Trigger Line Notify with Cooldown Check
                     curr_time = time.time()
                     last_sent = self.last_line_notify_time.get(cam_name, 0.0)
-                    if curr_time - last_sent > config.LINE_COOLDOWN_SECONDS:
+                    if curr_time - last_sent > self.line_cooldown:
                         self.last_line_notify_time[cam_name] = curr_time
                         
                         # Determine token (camera override -> global token)
@@ -597,9 +697,21 @@ class App(tk.Tk):
                             msg = f"\n🚨 แจ้งเตือนตรวจพบการล้ม!\n📷 กล้อง: {cam_name.upper()}\n⏰ เวลา: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                             send_line_notify_async(msg, token)
                     
-        # Update Alert Banner
+        # Update Alert Banner & Audio Alert
         if any_fall:
             self.alert_banner.configure(text=f"⚠️ WARNING! FALL DETECTED ON CAMERA: {fall_cam_name.upper()} ⚠️", bg="#ff0055", fg="#ffffff")
+            
+            # Sound alarm if enabled and cooldown passed (5 seconds)
+            if self.audio_alert_enabled:
+                curr_t = time.time()
+                if curr_t - self.last_audio_alert_time > 5.0:
+                    self.last_audio_alert_time = curr_t
+                    # Beep asynchronously in a separate thread so it doesn't block GUI
+                    try:
+                        import winsound
+                        threading.Thread(target=lambda: winsound.Beep(1000, 600), daemon=True).start()
+                    except Exception:
+                        pass
         else:
             self.alert_banner.configure(text="", bg="#0c0c0e")
             
