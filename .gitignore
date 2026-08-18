@@ -4,3 +4,6 @@ __pycache__/
 .env
 mingit/
 data/
+build/
+dist/
+.agents/
