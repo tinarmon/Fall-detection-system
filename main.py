@@ -37,173 +37,7 @@ try:
 except AttributeError:
     pass
 
-# Global Locks and Shared Resources
-model_lock = threading.Lock()
-shared_model = None
-
-import urllib.request
-import urllib.parse
-import datetime
-
-def send_line_notify(message, token):
-    if not token or not token.strip():
-        return False
-    url = "https://notify-api.line.me/api/notify"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
-    data = urllib.parse.urlencode({"message": message}).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=5) as response:
-            return response.status == 200
-    except Exception as e:
-        print(f"Error sending Line Notify: {e}")
-        return False
-
-def send_line_notify_async(message, token, callback=None):
-    def worker():
-        success = send_line_notify(message, token)
-        if callback:
-            callback(success)
-    threading.Thread(target=worker, daemon=True).start()
-
-# Load the trained model safely
-def load_trained_model():
-    global shared_model
-    if os.path.isfile(config.MODEL_PATH):
-        try:
-            with model_lock:
-                shared_model = tf.keras.models.load_model(config.MODEL_PATH)
-            return True
-        except Exception as e:
-            print(f"Error loading model: {e}")
-    return False
-
-class CameraStream:
-    def __init__(self, app, name, source, width=640, height=480):
-        self.app = app
-        self.name = name
-        self.source = source
-        self.width = width
-        self.height = height
-        self.cap = None
-        self.is_running = False
-        self.last_frame = None
-        self.fps = 0.0
-        self.last_prediction = 0.0
-        self.last_status = "STANDBY"
-        self.sequence_buffer = deque(maxlen=config.TIME_STEPS)
-        self.thread = None
-        
-        # Try to resolve numeric index
-        try:
-            if str(source).isdigit():
-                self.source = int(source)
-        except Exception:
-            pass
-
-    def start(self):
-        if not self.is_running:
-            self.is_running = True
-            self.thread = threading.Thread(target=self._run_loop, daemon=True)
-            self.thread.start()
-
-    def stop(self):
-        self.is_running = False
-        if self.thread:
-            self.thread.join(timeout=1.0)
-            self.thread = None
-        if self.cap:
-            self.cap.release()
-            self.cap = None
-
-    def _run_loop(self):
-        global shared_model
-        
-        estimator = PoseEstimator()
-        calculator = AngleCalculator()
-        ui = UIManager()
-        
-        self.cap = cv2.VideoCapture(self.source)
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        
-        fps_time = time.time()
-        while self.is_running:
-            if not self.cap or not self.cap.isOpened():
-                ret, frame = False, None
-            else:
-                ret, frame = self.cap.read()
-                
-            if not ret or frame is None:
-                time.sleep(0.01)
-                continue
-                
-            curr_time = time.time()
-            self.fps = 1.0 / (curr_time - fps_time) if (curr_time - fps_time) > 0 else 30.0
-            fps_time = curr_time
-            
-            processed_frame, points_px, points_norm, points_world = estimator.process_frame(frame)
-            if processed_frame is None or processed_frame.size == 0:
-                processed_frame = frame.copy()
-                
-            is_valid_pose = False
-            left_angle, right_angle = 0.0, 0.0
-            bbox = None
-            
-            if points_px:
-                xs = [p[0] for p in points_px.values()]
-                ys = [p[1] for p in points_px.values()]
-                h, w, _ = processed_frame.shape
-                min_x, max_x = max(0, min(xs) - 50), min(w, max(xs) + 50)
-                min_y, max_y = max(0, min(ys) - 100), min(h, max(ys) + 50)
-                bbox = (min_x, min_y, max_x, max_y)
-                
-                if all(k in points_px for k in config.TARGET_LANDMARKS) and all(k in points_world for k in config.TARGET_LANDMARKS):
-                    is_valid_pose = True
-                    left_angle = calculator.calculate_angle_3d(points_world[11], points_world[23], points_world[25])
-                    right_angle = calculator.calculate_angle_3d(points_world[12], points_world[24], points_world[26])
-                    
-            prediction = 0.0
-            status_text = "NORMAL"
-            theme_color = (0, 255, 0)
-            
-            if is_valid_pose:
-                features = [left_angle / 180.0, right_angle / 180.0]
-                rel_features = estimator.get_relative_features(points_norm)
-                features.extend(rel_features)
-                
-                self.sequence_buffer.append(features)
-                if shared_model and len(self.sequence_buffer) == config.TIME_STEPS:
-                    input_data = np.array(self.sequence_buffer).reshape(1, config.TIME_STEPS, len(features))
-                    with model_lock:
-                        pred_val = shared_model.predict(input_data, verbose=0)[0][0]
-                    prediction = float(pred_val)
-                    if prediction > self.app.fall_threshold:
-                        status_text = "FALL DETECTED"
-                        theme_color = (0, 0, 255)
-                            
-            processed_frame = ui.draw_hud(
-                frame=processed_frame,
-                tester_name=self.name,
-                fps=self.fps,
-                status_text=status_text,
-                prediction=prediction,
-                theme_color=theme_color,
-                bbox=bbox,
-            )
-            if is_valid_pose:
-                processed_frame = ui.draw_angles(processed_frame, points_px, left_angle, right_angle)
-                
-            self.last_prediction = prediction
-            self.last_status = status_text
-            self.last_frame = processed_frame
-            
-        if self.cap:
-            self.cap.release()
-            self.cap = None
+from core.camera_monitor import CameraMonitor, send_line_notify_async
 
 class App(tk.Tk):
     def __init__(self):
@@ -230,10 +64,10 @@ class App(tk.Tk):
         # Load config
         self.config_path = os.path.join(config.BASE_DIR, "client_config.json")
         self.camera_configs = self.load_camera_config()
-        self.active_streams = {}
-        
-        # Load AI model
-        load_trained_model()
+        # Initialize camera monitor
+        self.monitor = CameraMonitor(self)
+        self.active_streams = self.monitor.active_streams
+        self.available_cameras = CameraMonitor.detect_available_cameras()
         
         self.setup_ui_styles()
         self.create_layout()
@@ -522,18 +356,58 @@ class App(tk.Tk):
         ent_name.insert(0, cfg["name"])
         ent_name.pack(fill="x", padx=20, pady=2)
         
+        # Source Selection Dropdown
         src_lbl_frame = ttk.Frame(modal)
         src_lbl_frame.pack(fill="x", padx=20, pady=(10, 2))
-        tk.Label(src_lbl_frame, text="Camera Source (0, 1, or RTSP URL):", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold")).pack(side="left")
+        tk.Label(src_lbl_frame, text="Select Camera Source:", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold")).pack(side="left")
         tk.Button(
             src_lbl_frame, text="❔", font=("Segoe UI", 8, "bold"), 
             bg="#1e1e24", fg="#00f0ff", activebackground="#2a2a35", activeforeground="#00f0ff", 
             bd=0, padx=5, pady=0, command=self.show_camera_source_help
         ).pack(side="left", padx=5)
         
+        # Build dropdown options based on detected cameras
+        choices = []
+        for cam_idx in self.available_cameras:
+            choices.append(f"Local Camera {cam_idx} (Detected)")
+        for cam_idx in range(5):
+            if cam_idx not in self.available_cameras:
+                choices.append(f"Local Camera {cam_idx}")
+        choices.append("IP Network Camera (RTSP URL)")
+        
+        # Determine initial selection
+        curr_src = str(cfg["source"])
+        initial_val = "IP Network Camera (RTSP URL)"
+        if curr_src.isdigit():
+            val_int = int(curr_src)
+            if val_int in self.available_cameras:
+                initial_val = f"Local Camera {val_int} (Detected)"
+            else:
+                initial_val = f"Local Camera {val_int}"
+                
+        combo_src = ttk.Combobox(modal, values=choices, state="readonly")
+        combo_src.set(initial_val)
+        combo_src.pack(fill="x", padx=20, pady=2)
+        
+        # Entry for custom RTSP URL
+        rtsp_lbl = tk.Label(modal, text="RTSP Stream URL:", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold"))
+        rtsp_lbl.pack(anchor="w", padx=20, pady=(5, 2))
+        
         ent_src = tk.Entry(modal, bg="#16161e", fg="#ffffff", bd=1)
-        ent_src.insert(0, str(cfg["source"]))
         ent_src.pack(fill="x", padx=20, pady=2)
+        if not curr_src.isdigit():
+            ent_src.insert(0, curr_src)
+            
+        def on_source_changed(event):
+            selected = combo_src.get()
+            if "Local Camera" in selected:
+                ent_src.delete(0, "end")
+                ent_src.configure(state="disabled", background="#0c0c0e")
+            else:
+                ent_src.configure(state="normal", background="#16161e")
+                
+        combo_src.bind("<<ComboboxSelected>>", on_source_changed)
+        on_source_changed(None) # Call once to set initial state
         
         # LINE Notify settings per camera
         token_lbl_frame = ttk.Frame(modal)
@@ -558,10 +432,22 @@ class App(tk.Tk):
             bd=0, padx=8, pady=2, command=lambda: self.test_camera_line_notify(ent_token.get().strip(), cfg["name"])
         ).pack(side="left", padx=(5, 0))
         
-        # Save
+        # Save Button
+        def do_save():
+            selected = combo_src.get()
+            if "Local Camera" in selected:
+                parts = selected.split()
+                final_source = parts[2]
+            else:
+                final_source = ent_src.get().strip()
+                if not final_source:
+                    messagebox.showerror("Error", "กรุณาระบุ RTSP URL สำหรับกล้องเน็ตเวิร์ก")
+                    return
+            self.save_camera_settings(modal, idx, ent_name.get(), final_source, ent_token.get())
+            
         btn_save = tk.Button(
             modal, text="Save Settings", font=("Segoe UI", 9, "bold"), bg="#00f0ff", fg="#000000", bd=0, pady=8,
-            command=lambda: self.save_camera_settings(modal, idx, ent_name.get(), ent_src.get(), ent_token.get())
+            command=do_save
         )
         btn_save.pack(fill="x", padx=20, pady=20)
 
@@ -572,9 +458,7 @@ class App(tk.Tk):
         
         # Stop stream if running
         old_name = self.camera_configs[idx]["name"]
-        if old_name in self.active_streams:
-            self.active_streams[old_name].stop()
-            del self.active_streams[old_name]
+        self.monitor.stop_camera_stream(old_name)
             
         self.camera_configs[idx]["name"] = name
         self.camera_configs[idx]["source"] = source
@@ -584,9 +468,7 @@ class App(tk.Tk):
         self.rebuild_grid_view()
         
         # Restart stream
-        stream = CameraStream(self, name, source)
-        self.active_streams[name] = stream
-        stream.start()
+        self.monitor.start_camera_stream(name, source)
 
     def add_camera(self):
         new_idx = len(self.camera_configs)
@@ -600,27 +482,21 @@ class App(tk.Tk):
         cfg = self.camera_configs[idx]
         cam_name = cfg["name"]
         
-        if cam_name in self.active_streams:
-            self.active_streams[cam_name].stop()
-            del self.active_streams[cam_name]
+        self.monitor.stop_camera_stream(cam_name)
             
         self.camera_configs.pop(idx)
         self.save_camera_config()
         self.rebuild_grid_view()
 
     def auto_start_streams(self):
-        self.stop_all_streams()
+        self.monitor.stop_all_streams()
         for cfg in self.camera_configs:
             name = cfg["name"]
             source = cfg["source"]
-            stream = CameraStream(self, name, source)
-            self.active_streams[name] = stream
-            stream.start()
+            self.monitor.start_camera_stream(name, source)
 
     def stop_all_streams(self):
-        for stream in list(self.active_streams.values()):
-            stream.stop()
-        self.active_streams.clear()
+        self.monitor.stop_all_streams()
 
     def save_camera_config(self):
         config_data = {
