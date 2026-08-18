@@ -108,7 +108,9 @@ class CameraStream:
             
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Force OpenCV to keep only 1 latest frame
         
+        frame_counter = 0
         fps_time = time.time()
         while self.is_running:
             if not self.cap or not self.cap.isOpened():
@@ -156,13 +158,21 @@ class CameraStream:
                 
                 self.sequence_buffer.append(features)
                 if shared_model and len(self.sequence_buffer) == config.TIME_STEPS:
-                    input_data = np.array(self.sequence_buffer).reshape(1, config.TIME_STEPS, len(features))
-                    with model_lock:
-                        pred_val = shared_model.predict(input_data, verbose=0)[0][0]
-                    prediction = float(pred_val)
-                    if prediction > self.monitor.app.fall_threshold:
-                        status_text = "FALL DETECTED"
-                        theme_color = (0, 0, 255)
+                    if frame_counter % 3 == 0:
+                        input_data = np.array(self.sequence_buffer).reshape(1, config.TIME_STEPS, len(features))
+                        with model_lock:
+                            pred_val = shared_model.predict(input_data, verbose=0)[0][0]
+                        prediction = float(pred_val)
+                    else:
+                        prediction = self.last_prediction
+                else:
+                    prediction = 0.0
+                    
+                frame_counter += 1
+                
+                if prediction > self.monitor.app.fall_threshold:
+                    status_text = "FALL DETECTED"
+                    theme_color = (0, 0, 255)
                             
             processed_frame = ui.draw_hud(
                 frame=processed_frame,
