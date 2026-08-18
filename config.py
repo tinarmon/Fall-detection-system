@@ -24,6 +24,7 @@ TIME_STEPS = 10             # Number of historical frames the AI looks at
 EPOCHS = 30                 # Number of training epochs
 BATCH_SIZE = 32             # Training batch size
 FALL_THRESHOLD = 0.6        # Prediction probability threshold to trigger a "Fall" alert
+LINE_COOLDOWN_SECONDS = 60  # Time in seconds between sending notifications per camera
 
 # ==========================================
 # 🧍 MEDIAPIPE POSE ESTIMATION SETTINGS
