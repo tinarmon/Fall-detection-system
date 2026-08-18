@@ -1,0 +1,8 @@
+build/
+dist/
+*.spec
+for client/
+client_config.json
+__pycache__/
+*.pyc
+payload.zip
