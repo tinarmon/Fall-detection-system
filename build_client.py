@@ -58,6 +58,23 @@ def build():
         print(f"Error compiling DPDF: {e}")
         return
 
+    # 2.5 Compile uninstall_gui.py into dist/DPDF/uninstall.exe
+    print("\n[STEP 1.5/4] Compiling uninstall_gui.py to standalone uninstall.exe...")
+    try:
+        subprocess.run(
+            [
+                sys.executable, "-m", "PyInstaller", "uninstall_gui.py", 
+                "--name=uninstall", "--onefile", "--noconsole", "--clean",
+                "--icon=assets/icon.ico", f"--distpath={os.path.join(project_dir, 'dist', 'DPDF')}"
+            ],
+            check=True,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        )
+        print("Successfully compiled uninstall.exe application!")
+    except Exception as e:
+        print(f"Error compiling uninstall: {e}")
+        return
+
     # 3. Create user manual and copy to dist/DPDF/
     print("\n[STEP 2/4] Generating user manual and packaging...")
     manual_content = """========================================================================
@@ -101,6 +118,12 @@ def build():
 - เมื่อบุคคลตรวจจับสูญเสียการทรงตัวหรือกำลังจะล้ม ตัวโมเดล AI จะคิดค่าความเสี่ยงเป็นเปอร์เซ็นต์
 - หากความเสี่ยงเกินเกณฑ์ที่ปลอดภัย แผงเตือนภัยด้านล่างสุดจะกะพริบเป็นแถบสีแดง 
   พร้อมส่งข้อความแจ้งเตือนเข้าสู่กลุ่ม LINE ทันทีตามรหัส Token ที่ตั้งไว้!
+
+------------------------------------------------------------------------
+❌ วิธีถอนการติดตั้งโปรแกรม (Uninstallation)
+------------------------------------------------------------------------
+1. เข้าไปยังโฟลเดอร์ติดตั้งของโปรแกรม
+2. ดับเบิ้ลคลิกไฟล์ "uninstall.exe" เพื่อทำการลบโปรแกรม ทางลัดบนเดสก์ท็อป และข้อมูลระบบทั้งหมดอย่างปลอดภัย
 """
     manual_path = os.path.join(project_dir, "dist", "DPDF", "คู่มือการใช้งาน.txt")
     with open(manual_path, "w", encoding="utf-8") as f:
