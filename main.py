@@ -567,10 +567,14 @@ class App(tk.Tk):
                     if curr_time - last_sent > self.line_cooldown:
                         self.last_line_notify_time[cam_name] = curr_time
                         
+                        # Trigger local video clip recording
+                        video_path = stream.save_fall_clip()
+                        video_filename = os.path.basename(video_path)
+                        
                         # Determine token (camera override -> global token)
                         token = cfg.get("line_token", "").strip() or self.global_line_token
                         if token:
-                            msg = f"\n🚨 แจ้งเตือนตรวจพบการล้ม!\n📷 กล้อง: {cam_name.upper()}\n⏰ เวลา: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                            msg = f"\n🚨 แจ้งเตือนตรวจพบการล้ม!\n📷 กล้อง: {cam_name.upper()}\n⏰ เวลา: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n📂 บันทึกวิดีโอหลักฐาน: {video_filename}"
                             send_line_notify_async(msg, token)
                     
         # Update Alert Banner & Audio Alert

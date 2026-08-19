@@ -14,6 +14,7 @@ import config
 from core.pose_estimator import PoseEstimator;
 from core.angle_calculator import AngleCalculator;
 from core.ui_manager import UIManager;
+from core.fall_recorder import FallRecorder;
 
 # Global Lock and Shared Model
 model_lock = threading.Lock()
@@ -70,6 +71,7 @@ class CameraStream:
         self.last_status = "STANDBY"
         self.sequence_buffer = deque(maxlen=config.TIME_STEPS)
         self.thread = None
+        self.fall_recorder = FallRecorder()
         
         # Try to resolve numeric index
         try:
@@ -189,10 +191,16 @@ class CameraStream:
             self.last_prediction = prediction
             self.last_status = status_text
             self.last_frame = processed_frame
+            self.fall_recorder.write_frame(processed_frame)
             
         if self.cap:
             self.cap.release()
             self.cap = None
+
+    def save_fall_clip(self):
+        fps_val = self.fps if self.fps > 0 else 30.0
+        return self.fall_recorder.save_recording(self.name, self.width, self.height, fps=fps_val)
+
 
 
 class CameraMonitor:
