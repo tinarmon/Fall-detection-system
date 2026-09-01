@@ -45,9 +45,22 @@ def build():
     print(f"Using Python Runtime: {python_exe}")
     
     project_dir = os.path.dirname(os.path.abspath(__file__))
-    client_dir = os.path.join(project_dir, "InstallerFile")
+    installer_dir = os.path.join(project_dir, "InstallerFile")
     dist_dir = os.path.join(project_dir, "dist")
     build_dir = os.path.join(project_dir, "build")
+    
+    # Excluded modules for lightweight setup/uninstall wizards
+    lightweight_excludes = [
+        "--exclude-module=cv2",
+        "--exclude-module=numpy",
+        "--exclude-module=matplotlib",
+        "--exclude-module=tensorflow",
+        "--exclude-module=mediapipe",
+        "--exclude-module=scipy",
+        "--exclude-module=PIL",
+        "--exclude-module=pandas",
+        "--exclude-module=torch"
+    ]
     
     # 1. Clean previous builds
     for folder in [build_dir, dist_dir]:
@@ -58,7 +71,7 @@ def build():
             except Exception as e:
                 print(f"Warning: Could not remove {folder}: {e}")
                 
-    os.makedirs(client_dir, exist_ok=True)
+    os.makedirs(installer_dir, exist_ok=True)
     
     # 2. Compile main.py into dist/DPDF/ (onedir mode with assets)
     print("\n[STEP 1/4] Compiling main.py to bytecode using PyInstaller...")
@@ -79,16 +92,16 @@ def build():
         traceback.print_exc()
         return
 
-    # 2.5 Compile uninstall_gui.py into dist/DPDF/uninstall.exe
+    # 2.5 Compile uninstall_gui.py into dist/DPDF/uninstall.exe (lightweight, no ML libraries)
     print("\n[STEP 1.5/4] Compiling uninstall_gui.py to standalone uninstall.exe...")
     try:
         subprocess.run(
             [
                 python_exe, "-m", "PyInstaller", "uninstall_gui.py", 
                 "--name=uninstall", "--onefile", "--noconsole", "--clean",
-                "--add-data=assets;assets", "--icon=assets/icon.ico",
+                "--noupx", "--icon=assets/icon.ico",
                 f"--distpath={os.path.join(dist_dir, 'DPDF')}"
-            ],
+            ] + lightweight_excludes,
             check=True,
             cwd=project_dir,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
@@ -159,56 +172,39 @@ def build():
         os.remove(zip_path)
     zip_dir(os.path.join(dist_dir, "DPDF"), zip_path)
     
-    # 4. Compile setup_gui.py into single installer DPDF_Setup.exe
+    # 4. Compile setup_gui.py into single installer DPDF_Setup.exe (lightweight, noupx)
     print("\n[STEP 3/4] Compiling DPDF_Setup.exe Installer Wizard...")
     try:
         subprocess.run(
             [
                 python_exe, "-m", "PyInstaller", "setup_gui.py", 
                 "--name=DPDF_Setup", "--onefile", "--noconsole", 
-                f"--add-data={zip_path};.", "--add-data=assets;assets", 
-                "--clean", "--icon=assets/icon.ico"
-            ],
+                f"--add-data={zip_path};.", 
+                "--clean", "--noupx", "--icon=assets/icon.ico",
+                f"--distpath={installer_dir}"
+            ] + lightweight_excludes,
             check=True,
             cwd=project_dir,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
-        
-        setup_exe_src = os.path.join(dist_dir, "DPDF_Setup.exe")
-        dest_setup = os.path.join(client_dir, "DPDF_Setup.exe")
-        if os.path.exists(setup_exe_src):
-            if os.path.exists(dest_setup):
-                try:
-                    os.remove(dest_setup)
-                except Exception:
-                    pass
-            shutil.move(setup_exe_src, dest_setup)
-            print(f"Successfully moved DPDF_Setup.exe ({os.path.getsize(dest_setup) / (1024*1024):.2f} MB) to '{client_dir}'!")
-        else:
-            raise FileNotFoundError(f"DPDF_Setup.exe was not found in {dist_dir}")
+        print(f"Successfully compiled DPDF_Setup.exe installer into '{installer_dir}'!")
             
     except Exception as e:
         print(f"Error compiling DPDF_Setup.exe: {e}")
         traceback.print_exc()
         return
         
-    # 5. Final Cleanups
+    # 5. Final Cleanups (only payload.zip, keep build clean)
     print("\n[STEP 4/4] Performing final cleanups...")
     if os.path.exists(zip_path):
         try:
             os.remove(zip_path)
         except Exception:
             pass
-    for folder in [build_dir, dist_dir]:
-        if os.path.exists(folder):
-            try:
-                shutil.rmtree(folder)
-            except Exception:
-                pass
             
     print("\n==================================================")
     print("Standalone bytecode installer compiled successfully!")
-    print(f"Output Setup Installer: '{client_dir}\\DPDF_Setup.exe'")
+    print(f"Output Setup Installer: '{installer_dir}\\DPDF_Setup.exe'")
     print("==================================================\n")
 
 if __name__ == "__main__":

@@ -7,17 +7,8 @@ compliant with UXUI_Design_Principles.md.
 import os
 import sys
 import tkinter as tk
-from tkinter import ttk, messagebox
-import cv2
-import numpy as np
 import theme
 from theme import AppFonts
-
-try:
-    from PIL import Image, ImageTk
-    HAS_PIL = True
-except ImportError:
-    HAS_PIL = False
 
 
 def convert_cv2_to_tk_image(frame, target_width=None, target_height=None):
@@ -25,6 +16,15 @@ def convert_cv2_to_tk_image(frame, target_width=None, target_height=None):
     High-performance converter from OpenCV BGR numpy array to tk.PhotoImage.
     Uses direct PPM raw byte buffer or PIL ImageTk for ultra-low CPU overhead (10-12x faster than PNG encoding).
     """
+    if frame is None:
+        return None
+    import cv2
+    import numpy as np
+    try:
+        from PIL import Image, ImageTk
+        has_pil = True
+    except ImportError:
+        has_pil = False
     if frame is None or frame.size == 0:
         return None
         
@@ -36,7 +36,7 @@ def convert_cv2_to_tk_image(frame, target_width=None, target_height=None):
             
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     
-    if HAS_PIL:
+    if has_pil:
         img = Image.fromarray(rgb)
         return ImageTk.PhotoImage(image=img)
     else:
