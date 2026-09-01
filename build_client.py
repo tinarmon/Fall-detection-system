@@ -3,6 +3,20 @@ import sys
 import shutil
 import zipfile
 import subprocess
+import traceback
+
+def get_python_exe():
+    """Resolve the python.exe inside the Project virtualenv that has PyInstaller installed."""
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(base_dir, "..", "Project", "venv", "Scripts", "python.exe"),
+        os.path.join(base_dir, "venv", "Scripts", "python.exe"),
+        sys.executable
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return os.path.abspath(c)
+    return sys.executable
 
 def zip_dir(src_dir, zip_file_path):
     print(f"Compressing relocatable workspace into '{os.path.basename(zip_file_path)}' using Windows native tar...")
@@ -27,11 +41,16 @@ def build():
     print("--- Starting DPDF Standalone Bytecode Builder ---")
     print("==================================================")
     
+    python_exe = get_python_exe()
+    print(f"Using Python Runtime: {python_exe}")
+    
     project_dir = os.path.dirname(os.path.abspath(__file__))
     client_dir = os.path.join(project_dir, "InstallerFile")
+    dist_dir = os.path.join(project_dir, "dist")
+    build_dir = os.path.join(project_dir, "build")
     
     # 1. Clean previous builds
-    for folder in [os.path.join(project_dir, "build"), os.path.join(project_dir, "dist")]:
+    for folder in [build_dir, dist_dir]:
         if os.path.exists(folder):
             print(f"Cleaning build folder: {os.path.basename(folder)}...")
             try:
@@ -41,21 +60,23 @@ def build():
                 
     os.makedirs(client_dir, exist_ok=True)
     
-    # 2. Compile main.py into standalone DPDF.exe (onedir mode with assets)
+    # 2. Compile main.py into dist/DPDF/ (onedir mode with assets)
     print("\n[STEP 1/4] Compiling main.py to bytecode using PyInstaller...")
     try:
         subprocess.run(
             [
-                sys.executable, "-m", "PyInstaller", "main.py", 
+                python_exe, "-m", "PyInstaller", "main.py", 
                 "--name=DPDF", "--onedir", "--noconsole", "--clean",
                 "--add-data=assets;assets", "--icon=assets/icon.ico"
             ],
             check=True,
+            cwd=project_dir,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
         print("Successfully compiled DPDF.exe application!")
     except Exception as e:
         print(f"Error compiling DPDF: {e}")
+        traceback.print_exc()
         return
 
     # 2.5 Compile uninstall_gui.py into dist/DPDF/uninstall.exe
@@ -63,17 +84,19 @@ def build():
     try:
         subprocess.run(
             [
-                sys.executable, "-m", "PyInstaller", "uninstall_gui.py", 
+                python_exe, "-m", "PyInstaller", "uninstall_gui.py", 
                 "--name=uninstall", "--onefile", "--noconsole", "--clean",
                 "--add-data=assets;assets", "--icon=assets/icon.ico",
-                f"--distpath={os.path.join(project_dir, 'dist', 'DPDF')}"
+                f"--distpath={os.path.join(dist_dir, 'DPDF')}"
             ],
             check=True,
+            cwd=project_dir,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
         print("Successfully compiled uninstall.exe application!")
     except Exception as e:
         print(f"Error compiling uninstall: {e}")
+        traceback.print_exc()
         return
 
     # 3. Create user manual and copy to dist/DPDF/
@@ -126,7 +149,7 @@ def build():
 1. เข้าไปยังโฟลเดอร์ติดตั้งของโปรแกรม
 2. ดับเบิ้ลคลิกไฟล์ "uninstall.exe" เพื่อทำการลบโปรแกรม ทางลัดบนเดสก์ท็อป และข้อมูลระบบทั้งหมดอย่างปลอดภัย
 """
-    manual_path = os.path.join(project_dir, "dist", "DPDF", "คู่มือการใช้งาน.txt")
+    manual_path = os.path.join(dist_dir, "DPDF", "คู่มือการใช้งาน.txt")
     with open(manual_path, "w", encoding="utf-8") as f:
         f.write(manual_content)
         
@@ -134,34 +157,54 @@ def build():
     zip_path = os.path.join(project_dir, "payload.zip")
     if os.path.exists(zip_path):
         os.remove(zip_path)
-    zip_dir(os.path.join(project_dir, "dist", "DPDF"), zip_path)
+    zip_dir(os.path.join(dist_dir, "DPDF"), zip_path)
     
-    # 4. Compile setup_gui.py directly into InstallerFile/DPDF_Setup.exe
+    # 4. Compile setup_gui.py into single installer DPDF_Setup.exe
     print("\n[STEP 3/4] Compiling DPDF_Setup.exe Installer Wizard...")
     try:
         subprocess.run(
             [
-                sys.executable, "-m", "PyInstaller", "setup_gui.py", 
+                python_exe, "-m", "PyInstaller", "setup_gui.py", 
                 "--name=DPDF_Setup", "--onefile", "--noconsole", 
                 f"--add-data={zip_path};.", "--add-data=assets;assets", 
-                "--clean", "--icon=assets/icon.ico",
-                f"--distpath={client_dir}"
+                "--clean", "--icon=assets/icon.ico"
             ],
             check=True,
+            cwd=project_dir,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
-        print("Successfully compiled DPDF_Setup.exe installer directly into InstallerFile!")
+        
+        setup_exe_src = os.path.join(dist_dir, "DPDF_Setup.exe")
+        dest_setup = os.path.join(client_dir, "DPDF_Setup.exe")
+        if os.path.exists(setup_exe_src):
+            if os.path.exists(dest_setup):
+                try:
+                    os.remove(dest_setup)
+                except Exception:
+                    pass
+            shutil.move(setup_exe_src, dest_setup)
+            print(f"Successfully moved DPDF_Setup.exe ({os.path.getsize(dest_setup) / (1024*1024):.2f} MB) to '{client_dir}'!")
+        else:
+            raise FileNotFoundError(f"DPDF_Setup.exe was not found in {dist_dir}")
+            
     except Exception as e:
         print(f"Error compiling DPDF_Setup.exe: {e}")
+        traceback.print_exc()
         return
         
     # 5. Final Cleanups
     print("\n[STEP 4/4] Performing final cleanups...")
     if os.path.exists(zip_path):
-        os.remove(zip_path)
-    for folder in [os.path.join(project_dir, "build"), os.path.join(project_dir, "dist")]:
+        try:
+            os.remove(zip_path)
+        except Exception:
+            pass
+    for folder in [build_dir, dist_dir]:
         if os.path.exists(folder):
-            shutil.rmtree(folder)
+            try:
+                shutil.rmtree(folder)
+            except Exception:
+                pass
             
     print("\n==================================================")
     print("Standalone bytecode installer compiled successfully!")
