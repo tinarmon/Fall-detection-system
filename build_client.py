@@ -28,7 +28,7 @@ def build():
     print("==================================================")
     
     project_dir = os.path.dirname(os.path.abspath(__file__))
-    client_dir = os.path.join(project_dir, "for client")
+    client_dir = os.path.join(project_dir, "InstallerFile")
     
     # 1. Clean previous builds
     for folder in [os.path.join(project_dir, "build"), os.path.join(project_dir, "dist")]:
@@ -65,7 +65,8 @@ def build():
             [
                 sys.executable, "-m", "PyInstaller", "uninstall_gui.py", 
                 "--name=uninstall", "--onefile", "--noconsole", "--clean",
-                "--icon=assets/icon.ico", f"--distpath={os.path.join(project_dir, 'dist', 'DPDF')}"
+                "--add-data=assets;assets", "--icon=assets/icon.ico",
+                f"--distpath={os.path.join(project_dir, 'dist', 'DPDF')}"
             ],
             check=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
@@ -99,7 +100,7 @@ def build():
 2. กรอกการตั้งค่ากล้อง:
    - Camera Name: ตั้งชื่อกล้องตามต้องการ (เช่น หน้าห้องน้ำ, ทางเดิน)
    - Camera Source:
-     * หากเป็นกล้อง USB เสียบสาย: ให้ใส่ตัวเลขลำดับกล้อง (เช่น "0" สำหรับกล้องหลัก, "1" สำหรับกล้องรอง)
+     * หากเป็นกล้อง USB เสียบสาย: ให้เลือก Local Camera หรือใส่ตัวเลขลำดับกล้อง
      * หากเป็นกล้องเน็ตเวิร์ก IP Camera: ให้กรอกลิงก์ RTSP (เช่น "rtsp://admin:password@192.168.1.100:554/stream1")
 3. กดปุ่ม "Save Settings"
 4. สัญญาณภาพสดพร้อมเส้นโครงกระดูกสแกนแบบ Cyberpunk จะปรากฏขึ้นทันที!
@@ -107,7 +108,7 @@ def build():
 ------------------------------------------------------------------------
 🛠️ วิธีการควบคุมสตรีมกล้องบนหน้าจอ Grid
 ------------------------------------------------------------------------
-สังเกตบริเวณมุมขวาบนของภาพแต่ละกล้อง จะมีปุ่มควบคุมสีเทาจางๆ:
+สังเกตบริเวณมุมขวาบนของภาพแต่ละกล้อง จะมีปุ่มควบคุม:
 - ปุ่มฟันเฟือง (⚙): คลิกเพื่อแก้ไขชื่อกล้อง หรือย้ายที่อยู่ IP/RTSP ของกล้องนั้นๆ
 - ปุ่มกากบาท (✕): คลิกเพื่อปิดสัญญาณกล้องตัวนั้นและลบออกจากการตั้งค่า
 * ข้อมูลกล้องทั้งหมดจะบันทึกในไฟล์ "client_config.json" อัตโนมัติ (เปิดรอบถัดไปกล้องจะขึ้นเลย ไม่ต้องตั้งค่าใหม่)
@@ -135,27 +136,21 @@ def build():
         os.remove(zip_path)
     zip_dir(os.path.join(project_dir, "dist", "DPDF"), zip_path)
     
-    # 4. Compile setup_gui.py into single installer DPDF_Setup.exe
+    # 4. Compile setup_gui.py directly into InstallerFile/DPDF_Setup.exe
     print("\n[STEP 3/4] Compiling DPDF_Setup.exe Installer Wizard...")
     try:
         subprocess.run(
             [
                 sys.executable, "-m", "PyInstaller", "setup_gui.py", 
                 "--name=DPDF_Setup", "--onefile", "--noconsole", 
-                f"--add-data={zip_path};.", "--clean", "--icon=assets/icon.ico"
+                f"--add-data={zip_path};.", "--add-data=assets;assets", 
+                "--clean", "--icon=assets/icon.ico",
+                f"--distpath={client_dir}"
             ],
             check=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         )
-        setup_exe_src = os.path.join(project_dir, "dist", "DPDF_Setup.exe")
-        if os.path.exists(setup_exe_src):
-            dest_setup = os.path.join(client_dir, "DPDF_Setup.exe")
-            if os.path.exists(dest_setup):
-                os.remove(dest_setup)
-            shutil.move(setup_exe_src, client_dir)
-            print("Successfully compiled DPDF_Setup.exe installer!")
-        else:
-            raise FileNotFoundError("DPDF_Setup.exe was not found after compilation.")
+        print("Successfully compiled DPDF_Setup.exe installer directly into InstallerFile!")
     except Exception as e:
         print(f"Error compiling DPDF_Setup.exe: {e}")
         return

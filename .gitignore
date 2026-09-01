@@ -2,10 +2,10 @@ build/
 dist/
 *.spec
 for client/
+InstallerFile/
 client_config.json
 __pycache__/
 *.pyc
 payload.zip
 .agents/
 recorded_falls/
-
