@@ -189,13 +189,14 @@ class CardFrame(tk.Frame):
 
 class BaseModalDialog(tk.Toplevel):
     """Standardized modal dialog wrapper with centered geometry, grab, and Esc to close."""
-    def __init__(self, parent, title="Dialog", width=480, height=400, resizable=False):
+    def __init__(self, parent, title="Dialog", width=480, height=400, resizable=True, min_width=440, min_height=320):
         super().__init__(parent)
         self.title(title)
         self.configure(bg=theme.BG_DARK)
         self.transient(parent)
         self.grab_set()
         self.resizable(resizable, resizable)
+        self.minsize(min_width, min_height)
         
         # Centering on parent window
         parent.update_idletasks()

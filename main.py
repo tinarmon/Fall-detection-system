@@ -56,12 +56,26 @@ except AttributeError:
 class GlobalSettingsDialog(BaseModalDialog):
     """Modal dialog for global system configurations."""
     def __init__(self, parent, app):
-        super().__init__(parent, title="Global System Settings", width=460, height=420)
+        super().__init__(parent, title="Global System Settings", width=500, height=480, resizable=True, min_width=440, min_height=420)
         self.app = app
         fonts = theme.AppFonts.get(self)
         
+        # Bottom Action Bar (Packed FIRST at bottom to ensure it is always visible)
+        btn_bar = tk.Frame(self.body, bg=theme.BG_DARK)
+        btn_bar.pack(fill="x", side="bottom", pady=(theme.SPACE_MD, 0))
+        
+        btn_cancel = SecondaryButton(btn_bar, text="ยกเลิก (Cancel)", command=self.destroy)
+        btn_cancel.pack(side="right", padx=(theme.SPACE_SM, 0))
+        
+        btn_save = PrimaryButton(btn_bar, text="💾 บันทึกการตั้งค่า (Save)", command=self.do_save)
+        btn_save.pack(side="right")
+        
+        # Form Content Container (Packs in remaining space)
+        content = tk.Frame(self.body, bg=theme.BG_DARK)
+        content.pack(fill="both", expand=True)
+        
         # 1. AI Sensitivity Card
-        card_ai = CardFrame(self.body)
+        card_ai = CardFrame(content)
         card_ai.pack(fill="x", pady=(0, theme.SPACE_SM))
         
         lbl_ai_title = tk.Label(
@@ -98,7 +112,7 @@ class GlobalSettingsDialog(BaseModalDialog):
         self.slider.pack(side="left", fill="x", expand=True)
 
         # 2. Alert Cooldown Card
-        card_alert = CardFrame(self.body)
+        card_alert = CardFrame(content)
         card_alert.pack(fill="x", pady=(0, theme.SPACE_SM))
         
         lbl_cd_title = tk.Label(
@@ -123,8 +137,8 @@ class GlobalSettingsDialog(BaseModalDialog):
         self.sp_cooldown.pack(fill="x")
 
         # 3. Audio Alarm Card
-        card_audio = CardFrame(self.body)
-        card_audio.pack(fill="x", pady=(0, theme.SPACE_MD))
+        card_audio = CardFrame(content)
+        card_audio.pack(fill="x", pady=(0, theme.SPACE_SM))
         
         self.var_audio = tk.BooleanVar(value=self.app.audio_alert_enabled)
         chk_audio = tk.Checkbutton(
@@ -135,16 +149,6 @@ class GlobalSettingsDialog(BaseModalDialog):
             highlightthickness=0
         )
         chk_audio.pack(anchor="w")
-
-        # Action Buttons
-        btn_bar = tk.Frame(self.body, bg=theme.BG_DARK)
-        btn_bar.pack(fill="x", side="bottom")
-        
-        btn_cancel = SecondaryButton(btn_bar, text="ยกเลิก (Cancel)", command=self.destroy)
-        btn_cancel.pack(side="right", padx=(theme.SPACE_SM, 0))
-        
-        btn_save = PrimaryButton(btn_bar, text="💾 บันทึกการตั้งค่า (Save)", command=self.do_save)
-        btn_save.pack(side="right")
         
         self.bind("<Return>", lambda e: self.do_save())
 
@@ -163,14 +167,28 @@ class GlobalSettingsDialog(BaseModalDialog):
 class CameraConfigDialog(BaseModalDialog):
     """Modal dialog for individual camera stream configuration."""
     def __init__(self, parent, app, camera_index):
-        super().__init__(parent, title="Camera Configuration", width=500, height=480)
+        super().__init__(parent, title="Camera Configuration", width=540, height=560, resizable=True, min_width=480, min_height=500)
         self.app = app
         self.idx = camera_index
         self.cfg = self.app.camera_configs[camera_index]
         fonts = theme.AppFonts.get(self)
 
+        # Bottom Action Bar (Packed FIRST at bottom to ensure it is ALWAYS visible and never cut off)
+        btn_bar = tk.Frame(self.body, bg=theme.BG_DARK)
+        btn_bar.pack(fill="x", side="bottom", pady=(theme.SPACE_MD, 0))
+        
+        btn_cancel = SecondaryButton(btn_bar, text="ยกเลิก (Cancel)", command=self.destroy)
+        btn_cancel.pack(side="right", padx=(theme.SPACE_SM, 0))
+        
+        btn_save = PrimaryButton(btn_bar, text="💾 บันทึกกล้อง (Save)", command=self.do_save)
+        btn_save.pack(side="right")
+
+        # Form Content Container (Packs in remaining vertical space)
+        content = tk.Frame(self.body, bg=theme.BG_DARK)
+        content.pack(fill="both", expand=True)
+
         # 1. Camera Name Field
-        card_name = CardFrame(self.body)
+        card_name = CardFrame(content)
         card_name.pack(fill="x", pady=(0, theme.SPACE_SM))
         
         lbl_name = tk.Label(
@@ -187,7 +205,7 @@ class CameraConfigDialog(BaseModalDialog):
         self.ent_name.pack(fill="x", ipady=3)
 
         # 2. Camera Source Field
-        card_src = CardFrame(self.body)
+        card_src = CardFrame(content)
         card_src.pack(fill="x", pady=(0, theme.SPACE_SM))
         
         header_src = tk.Frame(card_src, bg=theme.SURFACE_CARD)
@@ -253,8 +271,8 @@ class CameraConfigDialog(BaseModalDialog):
         on_src_select()
 
         # 3. LINE Token Override Field
-        card_token = CardFrame(self.body)
-        card_token.pack(fill="x", pady=(0, theme.SPACE_MD))
+        card_token = CardFrame(content)
+        card_token.pack(fill="x", pady=(0, theme.SPACE_SM))
         
         lbl_tk = tk.Label(
             card_token, text="LINE Notify Token เฉพาะกล้องนี้ (ไม่จำเป็นต้องระบุ):", font=fonts.BODY_BOLD,
@@ -284,16 +302,6 @@ class CameraConfigDialog(BaseModalDialog):
         )
         btn_test.pack(side="right", padx=(theme.SPACE_SM, 0))
 
-        # Action Buttons
-        btn_bar = tk.Frame(self.body, bg=theme.BG_DARK)
-        btn_bar.pack(fill="x", side="bottom")
-        
-        btn_cancel = SecondaryButton(btn_bar, text="ยกเลิก", command=self.destroy)
-        btn_cancel.pack(side="right", padx=(theme.SPACE_SM, 0))
-        
-        btn_save = PrimaryButton(btn_bar, text="💾 บันทึกกล้อง", command=self.do_save)
-        btn_save.pack(side="right")
-        
         self.bind("<Return>", lambda e: self.do_save())
 
     def show_source_help(self):
@@ -357,8 +365,11 @@ class CameraConfigDialog(BaseModalDialog):
 class HelpDialog(BaseModalDialog):
     """Modal dialog displaying comprehensive user guide and instructions."""
     def __init__(self, parent):
-        super().__init__(parent, title="DPDF 3D - User Manual & Help Guide", width=580, height=520)
+        super().__init__(parent, title="DPDF 3D - User Manual & Help Guide", width=620, height=540, resizable=True, min_width=520, min_height=440)
         fonts = theme.AppFonts.get(self)
+
+        btn_ok = PrimaryButton(self.body, text="เข้าใจแล้ว (Close)", command=self.destroy)
+        btn_ok.pack(side="bottom", fill="x", pady=(theme.SPACE_MD, 0))
 
         notebook = ttk.Notebook(self.body)
         notebook.pack(fill="both", expand=True)
@@ -370,10 +381,10 @@ class HelpDialog(BaseModalDialog):
         t1_text = (
             "คู่มือการใช้งานระบบและการเชื่อมต่อกล้อง:\n\n"
             "1. เชื่อมต่อกล้องใหม่:\n"
-            "   - กดปุ่ม '+ Add Camera Stream' บนช่องว่างในหน้าจอกริด\n"
+            "   - กดปุ่ม '+ Add Stream' บนแถบด้านบนหรือกด '+ Add Camera Stream' บนช่องว่าง\n"
             "   - หรือกดปุ่มลัด 'Ctrl + N'\n\n"
             "2. ตั้งค่ากล้องแต่ละจุด (⚙):\n"
-            "   - ดับเบิ้ลคลิกหรือกดปุ่มรูปฟันเฟืองที่มุมกล้องเพื่อเปลี่ยนชื่อและประเภทสัญญาณ\n"
+            "   - กดปุ่มรูปฟันเฟืองที่มุมกล้องเพื่อเปลี่ยนชื่อและประเภทสัญญาณ\n"
             "   - กล้อง Webcam เสียบสาย: เลือกลำดับกล้อง (Local Camera 0, 1...)\n"
             "   - กล้อง IP RTSP: กรอก URL เครือข่าย (rtsp://...)\n\n"
             "3. การปิดหรือลบกล้อง (✕):\n"
@@ -416,9 +427,6 @@ class HelpDialog(BaseModalDialog):
         )
         lbl_t3 = tk.Label(tab3, text=t3_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
         lbl_t3.pack(fill="both", expand=True)
-
-        btn_ok = PrimaryButton(self.body, text="เข้าใจแล้ว (Close)", command=self.destroy)
-        btn_ok.pack(side="bottom", fill="x", pady=(theme.SPACE_MD, 0))
 
 
 class App(tk.Tk):
@@ -478,11 +486,17 @@ class App(tk.Tk):
         self.workspace = tk.Frame(self, bg=theme.BG_DARK, padx=theme.SPACE_LG, pady=theme.SPACE_MD)
         self.workspace.pack(fill="both", expand=True)
         
+        self.workspace.columnconfigure(0, weight=1)
+        self.workspace.rowconfigure(0, weight=0) # Row 0: Top Nav Bar (Fixed height)
+        self.workspace.rowconfigure(1, weight=1) # Row 1: Camera Grid (Expands to fill all middle space)
+        self.workspace.rowconfigure(2, weight=0) # Row 2: Toast Alert Banner (Fixed height)
+        self.workspace.rowconfigure(3, weight=0) # Row 3: Bottom LINE Notify Bar (Fixed height, always anchored)
+        
         # ==========================================
-        # 1. Top Navigation Bar
+        # 1. Top Navigation Bar (Row 0)
         # ==========================================
         nav_bar = tk.Frame(self.workspace, bg=theme.BG_DARK)
-        nav_bar.pack(fill="x", pady=(0, theme.SPACE_MD))
+        nav_bar.grid(row=0, column=0, sticky="ew", pady=(0, theme.SPACE_SM))
         
         # Left: Branding
         brand_frame = tk.Frame(nav_bar, bg=theme.BG_DARK)
@@ -530,16 +544,22 @@ class App(tk.Tk):
         btn_help.pack(side="left")
 
         # ==========================================
-        # 2. Camera Grid Container
+        # 2. Camera Grid Container (Row 1)
         # ==========================================
         self.grid_container = tk.Frame(self.workspace, bg=theme.BG_DARK)
-        self.grid_container.pack(fill="both", expand=True, pady=(0, theme.SPACE_SM))
+        self.grid_container.grid(row=1, column=0, sticky="nsew", pady=(0, theme.SPACE_SM))
 
         # ==========================================
-        # 3. Bottom LINE Notify Bar
+        # 3. Toast Alert Banner (Row 2)
+        # ==========================================
+        self.toast = ToastBanner(self.workspace)
+        self.toast.grid(row=2, column=0, sticky="ew", pady=(0, theme.SPACE_XS))
+
+        # ==========================================
+        # 4. Bottom LINE Notify Bar (Row 3)
         # ==========================================
         line_card = CardFrame(self.workspace, padding=theme.SPACE_SM)
-        line_card.pack(fill="x", side="bottom", pady=(theme.SPACE_XS, 0))
+        line_card.grid(row=3, column=0, sticky="ew")
         
         lbl_line = tk.Label(line_card, text="LINE Notify Token หลัก:", font=self.fonts.BODY_BOLD, bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY)
         lbl_line.pack(side="left", padx=(theme.SPACE_SM, theme.SPACE_SM))
@@ -569,12 +589,6 @@ class App(tk.Tk):
             padx=theme.SPACE_MD, pady=theme.SPACE_XS, tooltip="บันทึก Token หลัก (Ctrl+S)"
         )
         btn_save_token.pack(side="left", padx=(0, theme.SPACE_SM))
-
-        # ==========================================
-        # 4. Toast Alert Banner
-        # ==========================================
-        self.toast = ToastBanner(self.workspace)
-        self.toast.pack(fill="x", side="bottom", pady=(0, theme.SPACE_XS))
 
         # Build initial grid
         self.rebuild_grid_view()
@@ -638,39 +652,48 @@ class App(tk.Tk):
                 cfg = self.camera_configs[i]
                 cam_name = cfg.get("name", f"Camera {i+1}")
                 
-                # Active Camera Card
-                cell = CardFrame(self.grid_container, bg=theme.OVERLAY_BG, padding=0)
+                # Active Camera Card (Using grid inside card to cleanly separate header from video container)
+                cell = CardFrame(self.grid_container, bg=theme.SURFACE_CARD, padding=theme.SPACE_XS)
                 cell.grid(row=r, column=c, sticky="nsew", padx=theme.SPACE_XS, pady=theme.SPACE_XS)
+                cell.columnconfigure(0, weight=1)
+                cell.rowconfigure(0, weight=0) # Header bar
+                cell.rowconfigure(1, weight=1) # Video container
                 
-                lbl_video = tk.Label(cell, bg=theme.OVERLAY_BG)
-                lbl_video.pack(fill="both", expand=True)
-                
-                # Top Header Bar Overlay
-                top_overlay = tk.Frame(lbl_video, bg=theme.SURFACE_CARD, padx=theme.SPACE_SM, pady=theme.SPACE_XS)
-                top_overlay.place(relx=0.0, rely=0.0, relwidth=1.0, anchor="nw")
+                # Top Header Bar (Persistent frame above the video, never covered by image frames)
+                top_bar = tk.Frame(cell, bg=theme.SURFACE_CARD, padx=theme.SPACE_SM, pady=theme.SPACE_XS)
+                top_bar.grid(row=0, column=0, sticky="ew", pady=(0, theme.SPACE_XS))
                 
                 lbl_cam_title = tk.Label(
-                    top_overlay, text=cam_name.upper(), font=self.fonts.BODY_BOLD,
+                    top_bar, text=cam_name.upper(), font=self.fonts.BODY_BOLD,
                     bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY
                 )
                 lbl_cam_title.pack(side="left")
                 
                 # Right action icons
                 btn_close = IconButton(
-                    top_overlay, icon="✕", command=lambda idx=i: self.delete_camera(idx),
+                    top_bar, icon="✕", command=lambda idx=i: self.delete_camera(idx),
                     bg_color=theme.SURFACE_CARD, fg_color=theme.TEXT_MUTED,
                     hover_bg=theme.DANGER, tooltip="Remove Camera Stream"
                 )
                 btn_close.pack(side="right", padx=(theme.SPACE_XS, 0))
                 
                 btn_gear = IconButton(
-                    top_overlay, icon="⚙", command=lambda idx=i: self.open_camera_settings(idx),
+                    top_bar, icon="⚙", command=lambda idx=i: self.open_camera_settings(idx),
                     bg_color=theme.SURFACE_CARD, fg_color=theme.TEXT_SECONDARY,
                     hover_bg=theme.SURFACE_HOVER, tooltip="Configure Camera"
                 )
                 btn_gear.pack(side="right")
                 
+                # Dedicated Video Container Frame with pack_propagate(False)
+                video_container = tk.Frame(cell, bg=theme.OVERLAY_BG)
+                video_container.grid(row=1, column=0, sticky="nsew")
+                video_container.pack_propagate(False)
+                
+                lbl_video = tk.Label(video_container, bg=theme.OVERLAY_BG)
+                lbl_video.pack(fill="both", expand=True)
+                
                 cfg["label_widget"] = lbl_video
+                cfg["container_widget"] = video_container
                 
             elif i == num_cameras and num_cameras < 4:
                 # Empty Camera Slot conforming to UX/UI Principle Section 9
@@ -778,8 +801,10 @@ class App(tk.Tk):
                 frame = stream.last_frame
                 
                 if frame is not None and "label_widget" in cfg and cfg["label_widget"].winfo_exists():
-                    w = cfg["label_widget"].winfo_width()
-                    h = cfg["label_widget"].winfo_height()
+                    # Calculate dimensions from container frame
+                    container = cfg.get("container_widget", cfg["label_widget"])
+                    w = container.winfo_width()
+                    h = container.winfo_height()
                     
                     # Ultra-fast zero-compression frame conversion (12x faster than PNG)
                     imgtk = convert_cv2_to_tk_image(frame, target_width=w, target_height=h)
