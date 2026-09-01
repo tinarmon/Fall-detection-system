@@ -1,3 +1,8 @@
+"""
+Pre-Fall Detection 3D - Client Dashboard
+Refactored and optimized according to UXUI_Design_Principles.md
+"""
+
 import os
 import sys
 
@@ -16,35 +21,417 @@ except ImportError:
 
 import json
 import time
+import datetime
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-from collections import deque
+from tkinter import ttk, messagebox
 import cv2
 import numpy as np
-import tensorflow as tf
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
-from core.pose_estimator import PoseEstimator
-from core.angle_calculator import AngleCalculator
-from core.ui_manager import UIManager
+import theme
+from core.camera_monitor import CameraMonitor, send_line_notify_async
+from ui_components import (
+    AppFonts,
+    PrimaryButton,
+    SecondaryButton,
+    DangerButton,
+    IconButton,
+    CardFrame,
+    BaseModalDialog,
+    EmptyCameraSlot,
+    ToastBanner,
+    Tooltip,
+    convert_cv2_to_tk_image
+)
 
 # Reconfigure stdout/stderr to UTF-8
 try:
     sys.stdout.reconfigure(encoding='utf-8')
-    sys.stderr.reconfigure(encoding='utf-8')
 except AttributeError:
     pass
 
-from core.camera_monitor import CameraMonitor, send_line_notify_async
+
+class GlobalSettingsDialog(BaseModalDialog):
+    """Modal dialog for global system configurations."""
+    def __init__(self, parent, app):
+        super().__init__(parent, title="Global System Settings", width=460, height=420)
+        self.app = app
+        fonts = theme.AppFonts.get(self)
+        
+        # 1. AI Sensitivity Card
+        card_ai = CardFrame(self.body)
+        card_ai.pack(fill="x", pady=(0, theme.SPACE_SM))
+        
+        lbl_ai_title = tk.Label(
+            card_ai, text="AI Fall Detection Threshold (Sensitivity)", font=fonts.BODY_BOLD,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY
+        )
+        lbl_ai_title.pack(anchor="w")
+        
+        lbl_ai_sub = tk.Label(
+            card_ai, text="ค่าความน่าจะเป็นขั้นต่ำเพื่อส่งสัญญาณเตือนภัย (ค่ามาตรฐาน 0.60)", font=fonts.CAPTION,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
+        )
+        lbl_ai_sub.pack(anchor="w", pady=(0, theme.SPACE_SM))
+        
+        slider_frame = tk.Frame(card_ai, bg=theme.SURFACE_CARD)
+        slider_frame.pack(fill="x")
+        
+        self.lbl_threshold_val = tk.Label(
+            slider_frame, text=f"{self.app.fall_threshold:.2f}", font=fonts.MONO_BOLD,
+            bg=theme.SURFACE_ELEVATED, fg=theme.PRIMARY, padx=theme.SPACE_SM, pady=theme.SPACE_XS
+        )
+        self.lbl_threshold_val.pack(side="right", padx=(theme.SPACE_SM, 0))
+        
+        def on_slider_change(val):
+            self.lbl_threshold_val.configure(text=f"{float(val):.2f}")
+            
+        self.slider = tk.Scale(
+            slider_frame, from_=0.10, to=0.90, resolution=0.05, orient="horizontal",
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY, highlightthickness=0,
+            activebackground=theme.PRIMARY, troughcolor=theme.SURFACE_ELEVATED,
+            command=on_slider_change
+        )
+        self.slider.set(self.app.fall_threshold)
+        self.slider.pack(side="left", fill="x", expand=True)
+
+        # 2. Alert Cooldown Card
+        card_alert = CardFrame(self.body)
+        card_alert.pack(fill="x", pady=(0, theme.SPACE_SM))
+        
+        lbl_cd_title = tk.Label(
+            card_alert, text="LINE Alert Cooldown (Seconds)", font=fonts.BODY_BOLD,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY
+        )
+        lbl_cd_title.pack(anchor="w")
+        
+        lbl_cd_sub = tk.Label(
+            card_alert, text="ระยะเวลาหน่วงก่อนส่งข้อความเตือนซ้ำต่อกล้อง (ป้องกันข้อความสแปม)", font=fonts.CAPTION,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
+        )
+        lbl_cd_sub.pack(anchor="w", pady=(0, theme.SPACE_SM))
+        
+        self.sp_cooldown = tk.Spinbox(
+            card_alert, from_=10, to=300, increment=10, font=fonts.BODY,
+            bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY, bd=1,
+            insertbackground=theme.TEXT_PRIMARY, relief="solid", highlightthickness=0
+        )
+        self.sp_cooldown.delete(0, "end")
+        self.sp_cooldown.insert(0, str(self.app.line_cooldown))
+        self.sp_cooldown.pack(fill="x")
+
+        # 3. Audio Alarm Card
+        card_audio = CardFrame(self.body)
+        card_audio.pack(fill="x", pady=(0, theme.SPACE_MD))
+        
+        self.var_audio = tk.BooleanVar(value=self.app.audio_alert_enabled)
+        chk_audio = tk.Checkbutton(
+            card_audio, text="เปิดเสียงสัญญาณเตือนภัยในเครื่องเมื่อตรวจพบการล้ม (Audio Beep)",
+            variable=self.var_audio, font=fonts.BODY,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY, selectcolor=theme.SURFACE_ELEVATED,
+            activebackground=theme.SURFACE_CARD, activeforeground=theme.TEXT_PRIMARY,
+            highlightthickness=0
+        )
+        chk_audio.pack(anchor="w")
+
+        # Action Buttons
+        btn_bar = tk.Frame(self.body, bg=theme.BG_DARK)
+        btn_bar.pack(fill="x", side="bottom")
+        
+        btn_cancel = SecondaryButton(btn_bar, text="ยกเลิก (Cancel)", command=self.destroy)
+        btn_cancel.pack(side="right", padx=(theme.SPACE_SM, 0))
+        
+        btn_save = PrimaryButton(btn_bar, text="💾 บันทึกการตั้งค่า (Save)", command=self.do_save)
+        btn_save.pack(side="right")
+        
+        self.bind("<Return>", lambda e: self.do_save())
+
+    def do_save(self):
+        try:
+            self.app.fall_threshold = float(self.slider.get())
+            self.app.line_cooldown = max(5, int(self.sp_cooldown.get()))
+            self.app.audio_alert_enabled = bool(self.var_audio.get())
+            self.app.save_camera_config()
+            self.destroy()
+            self.app.toast.show_alert("บันทึกการตั้งค่าระบบเรียบร้อยแล้ว", "success", auto_hide_sec=3)
+        except Exception as ex:
+            messagebox.showerror("Error", f"ข้อมูลที่กรอกไม่ถูกต้อง: {ex}", parent=self)
+
+
+class CameraConfigDialog(BaseModalDialog):
+    """Modal dialog for individual camera stream configuration."""
+    def __init__(self, parent, app, camera_index):
+        super().__init__(parent, title="Camera Configuration", width=500, height=480)
+        self.app = app
+        self.idx = camera_index
+        self.cfg = self.app.camera_configs[camera_index]
+        fonts = theme.AppFonts.get(self)
+
+        # 1. Camera Name Field
+        card_name = CardFrame(self.body)
+        card_name.pack(fill="x", pady=(0, theme.SPACE_SM))
+        
+        lbl_name = tk.Label(
+            card_name, text="ชื่อจุดตรวจจับ (Camera Name):", font=fonts.BODY_BOLD,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY
+        )
+        lbl_name.pack(anchor="w", pady=(0, theme.SPACE_XS))
+        
+        self.ent_name = tk.Entry(
+            card_name, font=fonts.BODY, bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY,
+            insertbackground=theme.TEXT_PRIMARY, bd=1, relief="solid", highlightthickness=0
+        )
+        self.ent_name.insert(0, self.cfg.get("name", f"Camera {self.idx+1}"))
+        self.ent_name.pack(fill="x", ipady=3)
+
+        # 2. Camera Source Field
+        card_src = CardFrame(self.body)
+        card_src.pack(fill="x", pady=(0, theme.SPACE_SM))
+        
+        header_src = tk.Frame(card_src, bg=theme.SURFACE_CARD)
+        header_src.pack(fill="x", pady=(0, theme.SPACE_XS))
+        
+        lbl_src = tk.Label(
+            header_src, text="แหล่งสัญญาณภาพ (Camera Source):", font=fonts.BODY_BOLD,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY
+        )
+        lbl_src.pack(side="left")
+        
+        btn_src_help = IconButton(
+            header_src, icon="❔", command=self.show_source_help,
+            bg_color=theme.SURFACE_CARD, fg_color=theme.PRIMARY, hover_bg=theme.SURFACE_HOVER,
+            tooltip="คำแนะนำประเภทกล้อง"
+        )
+        btn_src_help.pack(side="left", padx=theme.SPACE_XS)
+        
+        # Build dropdown options
+        choices = []
+        for cam_idx in self.app.available_cameras:
+            choices.append(f"Local Camera {cam_idx} (Detected)")
+        for cam_idx in range(4):
+            if cam_idx not in self.app.available_cameras:
+                choices.append(f"Local Camera {cam_idx}")
+        choices.append("IP Network Camera (RTSP Stream)")
+        
+        curr_src = str(self.cfg.get("source", "0"))
+        initial_val = "IP Network Camera (RTSP Stream)"
+        if curr_src.isdigit():
+            val_int = int(curr_src)
+            if val_int in self.app.available_cameras:
+                initial_val = f"Local Camera {val_int} (Detected)"
+            else:
+                initial_val = f"Local Camera {val_int}"
+
+        self.combo_src = ttk.Combobox(card_src, values=choices, state="readonly", font=fonts.BODY)
+        self.combo_src.set(initial_val)
+        self.combo_src.pack(fill="x", pady=(0, theme.SPACE_SM))
+
+        lbl_rtsp = tk.Label(
+            card_src, text="ลิงก์สตรีม RTSP (สำหรับกล้องวงจรปิด IP Camera):", font=fonts.CAPTION,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
+        )
+        lbl_rtsp.pack(anchor="w", pady=(0, 2))
+
+        self.ent_rtsp = tk.Entry(
+            card_src, font=fonts.BODY, bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY,
+            insertbackground=theme.TEXT_PRIMARY, bd=1, relief="solid", highlightthickness=0
+        )
+        if not curr_src.isdigit():
+            self.ent_rtsp.insert(0, curr_src)
+        self.ent_rtsp.pack(fill="x", ipady=3)
+
+        def on_src_select(e=None):
+            selected = self.combo_src.get()
+            if "Local Camera" in selected:
+                self.ent_rtsp.configure(state="disabled", bg=theme.SURFACE_CARD)
+            else:
+                self.ent_rtsp.configure(state="normal", bg=theme.SURFACE_ELEVATED)
+
+        self.combo_src.bind("<<ComboboxSelected>>", on_src_select)
+        on_src_select()
+
+        # 3. LINE Token Override Field
+        card_token = CardFrame(self.body)
+        card_token.pack(fill="x", pady=(0, theme.SPACE_MD))
+        
+        lbl_tk = tk.Label(
+            card_token, text="LINE Notify Token เฉพาะกล้องนี้ (ไม่จำเป็นต้องระบุ):", font=fonts.BODY_BOLD,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY
+        )
+        lbl_tk.pack(anchor="w")
+        
+        lbl_tk_sub = tk.Label(
+            card_token, text="หากระบุจะส่งแจ้งเตือนแยกกลุ่มไลน์ตามจุด แทน Token หลักของระบบ", font=fonts.CAPTION,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
+        )
+        lbl_tk_sub.pack(anchor="w", pady=(0, theme.SPACE_XS))
+        
+        tk_entry_bar = tk.Frame(card_token, bg=theme.SURFACE_CARD)
+        tk_entry_bar.pack(fill="x")
+        
+        self.ent_token = tk.Entry(
+            tk_entry_bar, font=fonts.BODY, bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY,
+            insertbackground=theme.TEXT_PRIMARY, bd=1, relief="solid", highlightthickness=0
+        )
+        self.ent_token.insert(0, self.cfg.get("line_token", ""))
+        self.ent_token.pack(side="left", fill="x", expand=True, ipady=3)
+        
+        btn_test = SecondaryButton(
+            tk_entry_bar, text="🧪 ทดสอบ", command=self.test_line,
+            padx=theme.SPACE_SM, pady=theme.SPACE_XS
+        )
+        btn_test.pack(side="right", padx=(theme.SPACE_SM, 0))
+
+        # Action Buttons
+        btn_bar = tk.Frame(self.body, bg=theme.BG_DARK)
+        btn_bar.pack(fill="x", side="bottom")
+        
+        btn_cancel = SecondaryButton(btn_bar, text="ยกเลิก", command=self.destroy)
+        btn_cancel.pack(side="right", padx=(theme.SPACE_SM, 0))
+        
+        btn_save = PrimaryButton(btn_bar, text="💾 บันทึกกล้อง", command=self.do_save)
+        btn_save.pack(side="right")
+        
+        self.bind("<Return>", lambda e: self.do_save())
+
+    def show_source_help(self):
+        msg = (
+            "วิธีกรอกแหล่งสัญญาณกล้อง (Camera Source):\n\n"
+            "1. กล้องเว็บแคมในตัว หรือ USB Webcam:\n"
+            "   - เลือก Local Camera ในดรอปดาวน์ (0, 1, 2...)\n\n"
+            "2. กล้องวงจรปิด IP Network Camera (RTSP):\n"
+            "   - เลือก 'IP Network Camera' แล้วกรอก URL สตรีม เช่น:\n"
+            "   rtsp://username:password@192.168.1.100:554/stream1"
+        )
+        messagebox.showinfo("คู่มือแหล่งสัญญาณกล้อง", msg, parent=self)
+
+    def test_line(self):
+        token = self.ent_token.get().strip()
+        cam_name = self.ent_name.get().strip() or "Camera"
+        if not token:
+            messagebox.showwarning("Warning", "กรุณาระบุ Token เฉพาะกล้องก่อนทำการทดสอบ", parent=self)
+            return
+            
+        def cb(success):
+            if success:
+                self.after(0, lambda: messagebox.showinfo("LINE Notify", f"ส่งแจ้งเตือนทดสอบสำหรับ '{cam_name}' สำเร็จแล้ว!", parent=self))
+            else:
+                self.after(0, lambda: messagebox.showerror("LINE Notify", "ส่งแจ้งเตือนล้มเหลว กรุณาตรวจสอบรหัส Token", parent=self))
+                
+        msg = f"\n🧪 [DPDF Alert Test]\nทดสอบการเชื่อมต่อกล้อง: {cam_name.upper()}\n⏰ เวลา: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        send_line_notify_async(msg, token, callback=cb)
+
+    def do_save(self):
+        name = self.ent_name.get().strip() or f"Camera {self.idx+1}"
+        selected = self.combo_src.get()
+        if "Local Camera" in selected:
+            parts = selected.split()
+            source = parts[2]
+        else:
+            source = self.ent_rtsp.get().strip()
+            if not source:
+                messagebox.showerror("Error", "กรุณาระบุ RTSP URL สำหรับกล้องเน็ตเวิร์ก", parent=self)
+                return
+                
+        token = self.ent_token.get().strip()
+        
+        # Stop previous stream
+        old_name = self.app.camera_configs[self.idx].get("name", "")
+        self.app.monitor.stop_camera_stream(old_name)
+        
+        # Update config
+        self.app.camera_configs[self.idx]["name"] = name
+        self.app.camera_configs[self.idx]["source"] = source
+        self.app.camera_configs[self.idx]["line_token"] = token
+        self.app.save_camera_config()
+        self.destroy()
+        self.app.rebuild_grid_view()
+        
+        # Start new stream
+        self.app.monitor.start_camera_stream(name, source)
+        self.app.toast.show_alert(f"บันทึกและเชื่อมต่อกล้อง '{name}' สำเร็จ", "success", auto_hide_sec=3)
+
+
+class HelpDialog(BaseModalDialog):
+    """Modal dialog displaying comprehensive user guide and instructions."""
+    def __init__(self, parent):
+        super().__init__(parent, title="DPDF 3D - User Manual & Help Guide", width=580, height=520)
+        fonts = theme.AppFonts.get(self)
+
+        notebook = ttk.Notebook(self.body)
+        notebook.pack(fill="both", expand=True)
+
+        # Tab 1: Quick Start
+        tab1 = tk.Frame(notebook, bg=theme.BG_DARK, padx=theme.SPACE_MD, pady=theme.SPACE_MD)
+        notebook.add(tab1, text="📹 Camera Setup")
+
+        t1_text = (
+            "คู่มือการใช้งานระบบและการเชื่อมต่อกล้อง:\n\n"
+            "1. เชื่อมต่อกล้องใหม่:\n"
+            "   - กดปุ่ม '+ Add Camera Stream' บนช่องว่างในหน้าจอกริด\n"
+            "   - หรือกดปุ่มลัด 'Ctrl + N'\n\n"
+            "2. ตั้งค่ากล้องแต่ละจุด (⚙):\n"
+            "   - ดับเบิ้ลคลิกหรือกดปุ่มรูปฟันเฟืองที่มุมกล้องเพื่อเปลี่ยนชื่อและประเภทสัญญาณ\n"
+            "   - กล้อง Webcam เสียบสาย: เลือกลำดับกล้อง (Local Camera 0, 1...)\n"
+            "   - กล้อง IP RTSP: กรอก URL เครือข่าย (rtsp://...)\n\n"
+            "3. การปิดหรือลบกล้อง (✕):\n"
+            "   - กดปุ่มเครื่องหมายกากบาทที่มุมขวาบนของกล้องนั้นๆ เพื่อปิดสตรีมและนำออกจากระบบ"
+        )
+        lbl_t1 = tk.Label(tab1, text=t1_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
+        lbl_t1.pack(fill="both", expand=True)
+
+        # Tab 2: LINE Notify
+        tab2 = tk.Frame(notebook, bg=theme.BG_DARK, padx=theme.SPACE_MD, pady=theme.SPACE_MD)
+        notebook.add(tab2, text="💬 LINE Notify")
+
+        t2_text = (
+            "ขั้นตอนการออกรหัส LINE Notify Token สำหรับแจ้งเตือนภัย:\n\n"
+            "1. เปิดเว็บเบราว์เซอร์แล้วไปที่: https://notify-bot.line.me\n"
+            "2. ล็อกอินด้วยบัญชี LINE ของท่าน\n"
+            "3. คลิกที่ชื่อบัญชีมุมขวาบน -> เลือก 'My Page (หน้าของฉัน)'\n"
+            "4. เลื่อนลงมาด้านล่างสุด คลิกปุ่ม 'Generate Token (ออก Token)'\n"
+            "5. ตั้งชื่อบอท (เช่น DPDF Alert) และเลือก 'กลุ่มแชต' ที่ต้องการรับแจ้งเตือน\n"
+            "6. คัดลอกรหัส Token ที่ได้รับ นำมาวางในช่อง 'LINE Notify Token' ด้านล่างโปรแกรม\n\n"
+            "⚠️ สำคัญมาก: ต้องกด 'เชิญเพื่อน' นำบอทชื่อ 'LINE Notify' เข้าร่วมกลุ่มแชตนั้นด้วย"
+        )
+        lbl_t2 = tk.Label(tab2, text=t2_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
+        lbl_t2.pack(fill="both", expand=True)
+
+        # Tab 3: Shortcuts & Info
+        tab3 = tk.Frame(notebook, bg=theme.BG_DARK, padx=theme.SPACE_MD, pady=theme.SPACE_MD)
+        notebook.add(tab3, text="⌨️ Shortcuts & Info")
+
+        t3_text = (
+            "แป้นพิมพ์ลัด (Keyboard Shortcuts):\n\n"
+            "• Ctrl + N : เพิ่มกล้องใหม่ (Add Camera Stream)\n"
+            "• Ctrl + S : บันทึก Token และการตั้งค่าระบบ\n"
+            "• F1       : เปิดหน้าต่างคู่มือช่วยเหลือนี้\n"
+            "• Esc      : ปิดหน้าต่างการตั้งค่าหรือไดอะล็อก\n\n"
+            "ข้อมูลระบบ:\n"
+            "• Software: DPDF 3D Pre-Fall Detection System\n"
+            "• Core AI: MediaPipe Pose 3D + GRU Temporal Network\n"
+            "• Status: Standalone Desktop Client v2.0"
+        )
+        lbl_t3 = tk.Label(tab3, text=t3_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
+        lbl_t3.pack(fill="both", expand=True)
+
+        btn_ok = PrimaryButton(self.body, text="เข้าใจแล้ว (Close)", command=self.destroy)
+        btn_ok.pack(side="bottom", fill="x", pady=(theme.SPACE_MD, 0))
+
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("DPDF 3D - Pre-Fall Detection Dashboard")
-        self.geometry("1200x800")
-        self.configure(bg="#0c0c0e")
+        self.geometry("1240x820")
+        self.minsize(960, 640)
+        self.configure(bg=theme.BG_DARK)
+        
+        # Initialize fonts & theme
+        self.fonts = AppFonts.get(self)
+        theme.apply_ttk_theme(self)
         
         # Load window icon
         icon_path = os.path.join(config.BASE_DIR, "assets", "icon.png")
@@ -54,6 +441,7 @@ class App(tk.Tk):
             except Exception:
                 pass
                 
+        # App state variables
         self.global_line_token = ""
         self.last_line_notify_time = {}
         self.fall_threshold = 0.6
@@ -61,439 +449,284 @@ class App(tk.Tk):
         self.audio_alert_enabled = True
         self.last_audio_alert_time = 0.0
         
-        # Load config
+        # Load configuration
         self.config_path = os.path.join(config.BASE_DIR, "client_config.json")
         self.camera_configs = self.load_camera_config()
+        
         # Initialize camera monitor
         self.monitor = CameraMonitor(self)
         self.active_streams = self.monitor.active_streams
         self.available_cameras = CameraMonitor.detect_available_cameras()
         
-        self.setup_ui_styles()
+        # Build UI layout
         self.create_layout()
-        self.auto_start_streams()
+        self.bind_shortcuts()
         
-        # Periodical GUI frame update loop
+        # Start streams and GUI render loop
+        self.auto_start_streams()
         self.update_gui_loop()
 
-    def setup_ui_styles(self):
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure(".", bg="#0c0c0e", foreground="#f0f0f5", fieldbackground="#16161e")
-        style.configure("TFrame", background="#0c0c0e")
-        style.configure("Action.TButton", font=("Segoe UI", 9, "bold"), background="#00f0ff", foreground="#000000", borderwidth=0, padding=10)
-        style.map("Action.TButton", background=[("active", "#00d0e0")])
+    def bind_shortcuts(self):
+        self.bind("<Control-n>", lambda e: self.add_camera())
+        self.bind("<Control-N>", lambda e: self.add_camera())
+        self.bind("<Control-s>", lambda e: self.save_global_token())
+        self.bind("<Control-S>", lambda e: self.save_global_token())
+        self.bind("<F1>", lambda e: self.show_main_help())
 
     def create_layout(self):
-        # Master workspace container
-        self.workspace = ttk.Frame(self)
-        self.workspace.pack(fill="both", expand=True, padx=25, pady=25)
+        # Master workspace container with responsive grid weights
+        self.workspace = tk.Frame(self, bg=theme.BG_DARK, padx=theme.SPACE_LG, pady=theme.SPACE_MD)
+        self.workspace.pack(fill="both", expand=True)
         
-        # Header frame containing title and help button
-        header_frame = ttk.Frame(self.workspace)
-        header_frame.pack(fill="x", pady=(0, 20))
+        # ==========================================
+        # 1. Top Navigation Bar
+        # ==========================================
+        nav_bar = tk.Frame(self.workspace, bg=theme.BG_DARK)
+        nav_bar.pack(fill="x", pady=(0, theme.SPACE_MD))
         
-        header = tk.Label(header_frame, text="Pre-Fall Detection 3D Monitoring Grid", font=("Segoe UI", 16, "bold"), bg="#0c0c0e", fg="#f0f0f5")
-        header.pack(side="left")
+        # Left: Branding
+        brand_frame = tk.Frame(nav_bar, bg=theme.BG_DARK)
+        brand_frame.pack(side="left")
         
-        btn_help = tk.Button(
-            header_frame, text="❔ วิธีใช้งานโปรแกรม", font=("Segoe UI", 9, "bold"), 
-            bg="#1e1e24", fg="#00f0ff", activebackground="#2a2a35", activeforeground="#00f0ff", 
-            bd=0, padx=12, pady=5, command=self.show_main_help
+        lbl_logo = tk.Label(brand_frame, text="🛡️", font=("Segoe UI Emoji", 18), bg=theme.BG_DARK, fg=theme.PRIMARY)
+        lbl_logo.pack(side="left", padx=(0, theme.SPACE_SM))
+        
+        title_group = tk.Frame(brand_frame, bg=theme.BG_DARK)
+        title_group.pack(side="left")
+        
+        lbl_title = tk.Label(title_group, text="PRE-FALL DETECTION 3D", font=self.fonts.H1, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY)
+        lbl_title.pack(anchor="w")
+        
+        lbl_sub = tk.Label(title_group, text="Real-time AI Biomechanical Risk Monitoring Grid", font=self.fonts.CAPTION, bg=theme.BG_DARK, fg=theme.TEXT_SECONDARY)
+        lbl_sub.pack(anchor="w")
+        
+        # Right: Quick Controls
+        ctrl_frame = tk.Frame(nav_bar, bg=theme.BG_DARK)
+        ctrl_frame.pack(side="right")
+        
+        self.lbl_cam_count = tk.Label(
+            ctrl_frame, text="", font=self.fonts.CAPTION_BOLD,
+            bg=theme.SURFACE_ELEVATED, fg=theme.SUCCESS,
+            padx=theme.SPACE_MD, pady=theme.SPACE_SM
         )
-        btn_help.pack(side="right")
+        self.lbl_cam_count.pack(side="left", padx=(0, theme.SPACE_SM))
         
-        btn_settings = tk.Button(
-            header_frame, text="⚙️ ตั้งค่าระบบ", font=("Segoe UI", 9, "bold"), 
-            bg="#1e1e24", fg="#f0f0f5", activebackground="#2a2a35", activeforeground="#ffffff", 
-            bd=0, padx=12, pady=5, command=self.open_global_settings
+        btn_add_cam = SecondaryButton(
+            ctrl_frame, text="➕ Add Stream", command=self.add_camera,
+            tooltip="Add new camera stream (Ctrl+N)"
         )
-        btn_settings.pack(side="right", padx=(0, 10))
+        btn_add_cam.pack(side="left", padx=(0, theme.SPACE_SM))
         
-        # Grid container
-        self.grid_container = ttk.Frame(self.workspace)
-        self.grid_container.pack(fill="both", expand=True)
+        btn_settings = SecondaryButton(
+            ctrl_frame, text="⚙️ Settings", command=self.open_global_settings,
+            tooltip="Open system settings"
+        )
+        btn_settings.pack(side="left", padx=(0, theme.SPACE_SM))
         
-        # Global LINE Notify Token frame
-        line_frame = ttk.Frame(self.workspace)
-        line_frame.pack(fill="x", side="bottom", pady=(10, 5))
+        btn_help = SecondaryButton(
+            ctrl_frame, text="❔ Help Guide", command=self.show_main_help,
+            tooltip="Open user manual (F1)"
+        )
+        btn_help.pack(side="left")
+
+        # ==========================================
+        # 2. Camera Grid Container
+        # ==========================================
+        self.grid_container = tk.Frame(self.workspace, bg=theme.BG_DARK)
+        self.grid_container.pack(fill="both", expand=True, pady=(0, theme.SPACE_SM))
+
+        # ==========================================
+        # 3. Bottom LINE Notify Bar
+        # ==========================================
+        line_card = CardFrame(self.workspace, padding=theme.SPACE_SM)
+        line_card.pack(fill="x", side="bottom", pady=(theme.SPACE_XS, 0))
         
-        lbl_line = tk.Label(line_frame, text="LINE Notify Token หลัก:", font=("Segoe UI", 9, "bold"), bg="#0c0c0e", fg="#8a8a98")
-        lbl_line.pack(side="left", padx=(0, 10))
+        lbl_line = tk.Label(line_card, text="LINE Notify Token หลัก:", font=self.fonts.BODY_BOLD, bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY)
+        lbl_line.pack(side="left", padx=(theme.SPACE_SM, theme.SPACE_SM))
         
-        self.ent_global_token = tk.Entry(line_frame, bg="#16161e", fg="#ffffff", insertbackground="#ffffff", font=("Segoe UI", 9), bd=1)
+        self.ent_global_token = tk.Entry(
+            line_card, font=self.fonts.BODY, bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY,
+            insertbackground=theme.TEXT_PRIMARY, bd=1, relief="solid", highlightthickness=0
+        )
         self.ent_global_token.insert(0, self.global_line_token)
-        self.ent_global_token.pack(side="left", fill="x", expand=True, padx=5)
+        self.ent_global_token.pack(side="left", fill="x", expand=True, padx=theme.SPACE_SM, ipady=3)
         
-        btn_token_help = tk.Button(
-            line_frame, text="❔", font=("Segoe UI", 9, "bold"), 
-            bg="#1e1e24", fg="#00f0ff", activebackground="#2a2a35", activeforeground="#00f0ff", 
-            bd=0, padx=8, pady=2, command=self.show_line_token_help
+        btn_line_help = IconButton(
+            line_card, icon="❔", command=self.show_line_token_help,
+            bg_color=theme.SURFACE_CARD, fg_color=theme.PRIMARY, hover_bg=theme.SURFACE_HOVER,
+            tooltip="วิธีขอรหัส LINE Notify Token"
         )
-        btn_token_help.pack(side="left", padx=2)
+        btn_line_help.pack(side="left", padx=(0, theme.SPACE_SM))
         
-        btn_test_notify = tk.Button(
-            line_frame, text="🧪 ทดสอบส่ง", font=("Segoe UI", 9, "bold"), 
-            bg="#1e1e24", fg="#f0f0f5", activebackground="#2a2a35", activeforeground="#ffffff", 
-            bd=0, padx=10, pady=2, command=self.test_global_line_notify
+        btn_test_line = SecondaryButton(
+            line_card, text="🧪 ทดสอบส่ง", command=self.test_global_line_notify,
+            padx=theme.SPACE_MD, pady=theme.SPACE_XS, tooltip="ทดสอบการส่งข้อความเข้ากลุ่ม LINE"
         )
-        btn_test_notify.pack(side="left", padx=2)
+        btn_test_line.pack(side="left", padx=(0, theme.SPACE_SM))
         
-        btn_save_token = tk.Button(
-            line_frame, text="💾 บันทึก Token", font=("Segoe UI", 9, "bold"), 
-            bg="#00f0ff", fg="#000000", activebackground="#00d0e0", activeforeground="#000000", 
-            bd=0, padx=12, pady=2, command=self.save_global_token
+        btn_save_token = PrimaryButton(
+            line_card, text="💾 บันทึก Token", command=self.save_global_token,
+            padx=theme.SPACE_MD, pady=theme.SPACE_XS, tooltip="บันทึก Token หลัก (Ctrl+S)"
         )
-        btn_save_token.pack(side="left", padx=(10, 0))
-        
-        # Alert Banner
-        self.alert_banner = tk.Label(self.workspace, text="", font=("Segoe UI", 12, "bold"), bg="#0c0c0e", fg="#ff0055", pady=10)
-        self.alert_banner.pack(fill="x", side="bottom", pady=(5, 0))
-        
+        btn_save_token.pack(side="left", padx=(0, theme.SPACE_SM))
+
+        # ==========================================
+        # 4. Toast Alert Banner
+        # ==========================================
+        self.toast = ToastBanner(self.workspace)
+        self.toast.pack(fill="x", side="bottom", pady=(0, theme.SPACE_XS))
+
+        # Build initial grid
         self.rebuild_grid_view()
 
     def open_global_settings(self):
-        modal = tk.Toplevel(self)
-        modal.title("Global System Settings")
-        modal.geometry("380x320")
-        modal.configure(bg="#0c0c0e")
-        modal.transient(self)
-        modal.grab_set()
-        modal.resizable(False, False)
-        
-        # Load window icon for settings dialog
-        icon_path = os.path.join(config.BASE_DIR, "assets", "icon.png")
-        if os.path.exists(icon_path):
-            try:
-                modal.iconphoto(True, tk.PhotoImage(file=icon_path))
-            except Exception:
-                pass
-                
-        # 1. Fall Threshold (Sensitivity Slider)
-        tk.Label(modal, text="AI Fall Detection Threshold (0.1 - 0.9):", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=20, pady=(20, 2))
-        
-        threshold_frame = ttk.Frame(modal)
-        threshold_frame.pack(fill="x", padx=20, pady=2)
-        
-        self.lbl_threshold_val = tk.Label(threshold_frame, text=f"{self.fall_threshold:.2f}", font=("Segoe UI", 9, "bold"), bg="#0c0c0e", fg="#00f0ff", width=6)
-        self.lbl_threshold_val.pack(side="right")
-        
-        def on_slider_move(val):
-            self.lbl_threshold_val.configure(text=f"{float(val):.2f}")
-            
-        slider = tk.Scale(
-            threshold_frame, from_=0.1, to=0.9, resolution=0.05, orient="horizontal", 
-            bg="#0c0c0e", fg="#ffffff", highlightthickness=0, activebackground="#00f0ff", 
-            command=on_slider_move
-        )
-        slider.set(self.fall_threshold)
-        slider.pack(side="left", fill="x", expand=True)
-        
-        # 2. LINE Cooldown Time (Spinbox)
-        tk.Label(modal, text="LINE Alert Cooldown (seconds):", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=20, pady=(15, 2))
-        
-        sp_cooldown = tk.Spinbox(modal, from_=10, to=300, increment=10, bg="#16161e", fg="#ffffff", bd=1, insertbackground="#ffffff")
-        sp_cooldown.delete(0, "end")
-        sp_cooldown.insert(0, str(self.line_cooldown))
-        sp_cooldown.pack(fill="x", padx=20, pady=2)
-        
-        # 3. Audio Alarm (Checkbox)
-        chk_val = tk.BooleanVar(value=self.audio_alert_enabled)
-        chk_audio = tk.Checkbutton(
-            modal, text="Enable Local Beep Alarm on Fall Detection", variable=chk_val, 
-            bg="#0c0c0e", fg="#f0f0f5", selectcolor="#16161e", activebackground="#0c0c0e", activeforeground="#ffffff"
-        )
-        chk_audio.pack(anchor="w", padx=20, pady=15)
-        
-        # Save Settings
-        def do_save():
-            try:
-                self.fall_threshold = float(slider.get())
-                self.line_cooldown = int(sp_cooldown.get())
-                self.audio_alert_enabled = bool(chk_val.get())
-                self.save_camera_config()
-                modal.destroy()
-                messagebox.showinfo("Settings Saved", "บันทึกการตั้งค่าระบบเรียบร้อยแล้ว!")
-            except Exception as ex:
-                messagebox.showerror("Error", f"ข้อมูลไม่ถูกต้อง: {ex}")
-                
-        btn_save = tk.Button(
-            modal, text="Save System Settings", font=("Segoe UI", 9, "bold"), bg="#00f0ff", fg="#000000", bd=0, pady=8,
-            command=do_save
-        )
-        btn_save.pack(fill="x", padx=20, pady=10)
+        GlobalSettingsDialog(self, self)
 
     def show_main_help(self):
-        msg = (
-            "วิธีใช้งานโปรแกรม Pre-Fall Detection 3D:\n\n"
-            "1. เชื่อมต่อกล้อง: กดปุ่ม '+ Add Camera Stream' บนหน้าต่างกริด\n"
-            "2. ตั้งค่ากล้อง: ดับเบิ้ลคลิกหรือกดปุ่มรูปฟันเฟือง (⚙) เพื่อตั้งชื่อกล้องและกรอก Source\n"
-            "   - กล้อง Webcam เสียบสาย: กรอกตัวเลข '0' หรือ '1'\n"
-            "   - กล้อง IP/RTSP: กรอกลิงก์เครือข่าย 'rtsp://...'\n"
-            "3. ปิดกล้อง: กดปุ่ม '✕' เพื่อปิดสัญญาณภาพและนำออกจากการบันทึก\n"
-            "4. การแจ้งเตือน LINE: กรอก LINE Token ของกลุ่มท่านที่ช่องด้านล่างโปรแกรม เพื่อให้บอทแจ้งเหตุการณ์ทันทีที่มีผู้ล้ม"
-        )
-        messagebox.showinfo("วิธีใช้งานระบบ DPDF 3D", msg)
+        HelpDialog(self)
 
     def show_line_token_help(self):
-        msg = (
-            "วิธีออกรหัส LINE Notify Token สำหรับแจ้งเตือนภัยล้ม:\n\n"
-            "1. ไปที่เว็บไซต์ https://notify-bot.line.me จากบราวเซอร์\n"
-            "2. ล็อกอินด้วยบัญชี LINE หลักของคุณ\n"
-            "3. เข้าไปหน้าส่วนตัว (My Page) และคลิกปุ่ม 'ออก Token' (Generate Token)\n"
-            "4. ระบุชื่อบอทแสดงแจ้งเตือน (เช่น DPDF Alert) และเลือกกลุ่มแชตที่คุณต้องการแชร์ข้อมูล\n"
-            "5. คัดลอกรหัส Token ที่เว็บแจกให้ นำมาวางที่ช่องรหัสในโปรแกรมนี้แล้วกดบันทึก\n"
-            "6. *สำคัญ* อย่าลืมกดเชิญบอทที่ชื่อว่า 'LINE Notify' เข้าร่วมกลุ่มแชตนั้นด้วยเสมอก่อนใช้งาน"
-        )
-        messagebox.showinfo("คู่มือการติดตั้ง LINE Notify", msg)
+        HelpDialog(self)
 
     def test_global_line_notify(self):
         token = self.ent_global_token.get().strip()
         if not token:
-            messagebox.showerror("Error", "กรุณาระบุ LINE Token ก่อนทำการทดสอบ")
+            self.toast.show_alert("กรุณาระบุ LINE Token ก่อนทำการทดสอบ", "warning", auto_hide_sec=3)
             return
             
-        def test_callback(success):
+        def cb(success):
             if success:
-                messagebox.showinfo("LINE Notify Test", "ส่งข้อความทดสอบเข้ากลุ่มไลน์สำเร็จแล้ว!")
+                self.after(0, lambda: self.toast.show_alert("ส่งข้อความทดสอบเข้ากลุ่มไลน์สำเร็จแล้ว!", "success", auto_hide_sec=4))
             else:
-                messagebox.showerror("LINE Notify Test", "ส่งข้อความทดสอบล้มเหลว กรุณาตรวจสอบความถูกต้องของรหัส Token หรือสัญญาณเน็ตเวิร์ก")
+                self.after(0, lambda: self.toast.show_alert("ส่งข้อความทดสอบล้มเหลว กรุณาตรวจสอบรหัส Token", "danger", auto_hide_sec=5))
                 
         msg = f"\n🧪 [DPDF Alert Test]\nการทดสอบการเชื่อมต่อระบบเตือนภัยสำเร็จแล้ว!\n⏰ เวลาทดสอบ: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        send_line_notify_async(msg, token, callback=test_callback)
+        send_line_notify_async(msg, token, callback=cb)
 
     def save_global_token(self):
         self.global_line_token = self.ent_global_token.get().strip()
         self.save_camera_config()
-        messagebox.showinfo("Success", "บันทึกรหัส LINE Token หลักลงระบบเรียบร้อยแล้ว!")
+        self.toast.show_alert("บันทึกรหัส LINE Token หลักเรียบร้อยแล้ว", "success", auto_hide_sec=3)
 
     def rebuild_grid_view(self):
         for widget in self.grid_container.winfo_children():
             widget.destroy()
             
         num_cameras = len(self.camera_configs)
-        rows, cols = (1, 1) if num_cameras <= 1 else ((1, 2) if num_cameras == 2 else (2, 2))
+        self.lbl_cam_count.configure(text=f"● {num_cameras} Active Stream{'s' if num_cameras != 1 else ''}")
         
+        # Grid layout determination
+        if num_cameras <= 1:
+            rows, cols = 1, 1
+        elif num_cameras == 2:
+            rows, cols = 1, 2
+        else:
+            rows, cols = 2, 2
+            
         for r in range(rows):
             self.grid_container.rowconfigure(r, weight=1)
         for c in range(cols):
             self.grid_container.columnconfigure(c, weight=1)
             
-        for i in range(4):
+        total_slots = 4 if num_cameras >= 2 else (1 if num_cameras == 0 else min(2, num_cameras + 1))
+        
+        for i in range(total_slots):
             r = i // cols
             c = i % cols
             
             if i < num_cameras:
                 cfg = self.camera_configs[i]
-                cam_name = cfg["name"]
+                cam_name = cfg.get("name", f"Camera {i+1}")
                 
-                cell = tk.Frame(self.grid_container, bg="#16161e", bd=1, highlightbackground="#3c3c4b", highlightthickness=1)
-                cell.grid(row=r, column=c, sticky="nsew", padx=10, pady=10)
+                # Active Camera Card
+                cell = CardFrame(self.grid_container, bg=theme.OVERLAY_BG, padding=0)
+                cell.grid(row=r, column=c, sticky="nsew", padx=theme.SPACE_XS, pady=theme.SPACE_XS)
                 
-                lbl = tk.Label(cell, bg="#040406")
-                lbl.pack(fill="both", expand=True)
+                lbl_video = tk.Label(cell, bg=theme.OVERLAY_BG)
+                lbl_video.pack(fill="both", expand=True)
                 
-                # Title
-                lbl_title = tk.Label(lbl, text=cam_name.upper(), font=("Segoe UI", 9, "bold"), bg="#16161e", fg="#f0f0f5", padx=8, pady=4)
-                lbl_title.place(relx=0.0, rely=1.0, anchor="sw", x=15, y=-15)
+                # Top Header Bar Overlay
+                top_overlay = tk.Frame(lbl_video, bg=theme.SURFACE_CARD, padx=theme.SPACE_SM, pady=theme.SPACE_XS)
+                top_overlay.place(relx=0.0, rely=0.0, relwidth=1.0, anchor="nw")
                 
-                # Gear and Close button overlays
-                overlay = tk.Frame(lbl, bg="#1c1c24")
-                overlay.place(relx=1.0, rely=0.0, anchor="ne", x=-15, y=15)
+                lbl_cam_title = tk.Label(
+                    top_overlay, text=cam_name.upper(), font=self.fonts.BODY_BOLD,
+                    bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY
+                )
+                lbl_cam_title.pack(side="left")
                 
-                btn_gear = tk.Button(overlay, text="⚙", font=("Segoe UI Symbol", 10), bg="#2a2a35", fg="#a0a0b0", activebackground="#3a3a48", activeforeground="#ffffff", bd=0, padx=8, pady=2, command=lambda idx=i: self.open_camera_settings(idx))
-                btn_gear.pack(side="left")
+                # Right action icons
+                btn_close = IconButton(
+                    top_overlay, icon="✕", command=lambda idx=i: self.delete_camera(idx),
+                    bg_color=theme.SURFACE_CARD, fg_color=theme.TEXT_MUTED,
+                    hover_bg=theme.DANGER, tooltip="Remove Camera Stream"
+                )
+                btn_close.pack(side="right", padx=(theme.SPACE_XS, 0))
                 
-                btn_close = tk.Button(overlay, text="✕", font=("Segoe UI Symbol", 10), bg="#ff0055", fg="#ffffff", activebackground="#cc0044", activeforeground="#ffffff", bd=0, padx=8, pady=2, command=lambda idx=i: self.delete_camera(idx))
-                btn_close.pack(side="left", padx=(1, 0))
+                btn_gear = IconButton(
+                    top_overlay, icon="⚙", command=lambda idx=i: self.open_camera_settings(idx),
+                    bg_color=theme.SURFACE_CARD, fg_color=theme.TEXT_SECONDARY,
+                    hover_bg=theme.SURFACE_HOVER, tooltip="Configure Camera"
+                )
+                btn_gear.pack(side="right")
                 
-                cfg["label_widget"] = lbl
+                cfg["label_widget"] = lbl_video
+                
             elif i == num_cameras and num_cameras < 4:
-                cell = tk.Frame(self.grid_container, bg="#121216", bd=1, highlightbackground="#3c3c4b", highlightthickness=1)
-                cell.grid(row=r, column=c, sticky="nsew", padx=10, pady=10)
-                
-                btn_add = tk.Button(cell, text="+ Add Camera Stream", font=("Segoe UI", 11, "bold"), bg="#16161e", fg="#00f0ff", activebackground="#1e1e28", activeforeground="#00f0ff", bd=0, command=self.add_camera)
-                btn_add.pack(fill="both", expand=True)
-
-    def show_camera_source_help(self):
-        msg = (
-            "วิธีกรอกรหัสแหล่งสัญญาณกล้อง (Camera Source):\n\n"
-            "1. กล้องเว็บแคมในตัว หรือ เสียบสาย USB:\n"
-            "   - ให้กรอกตัวเลขลำดับกล้อง เริ่มจาก '0' (กล้องตัวแรก), '1' (กล้องตัวที่สอง), เป็นต้น\n\n"
-            "2. กล้องเน็ตเวิร์ก IP Camera หรือกล้องวงจรปิดผ่านเน็ต:\n"
-            "   - ให้กรอกลิงก์สตรีม RTSP ของกล้องให้ครบถ้วน\n"
-            "   - ตัวอย่างรูปแบบ: rtsp://username:password@ip_address:port/stream_path"
-        )
-        messagebox.showinfo("คู่มือแหล่งสัญญาณกล้อง", msg)
-
-    def test_camera_line_notify(self, token, cam_name):
-        if not token:
-            messagebox.showerror("Error", "กรุณาระบุ LINE Token เฉพาะกล้องก่อนทำการทดสอบ")
-            return
-            
-        def test_callback(success):
-            if success:
-                messagebox.showinfo("LINE Notify Test", f"ส่งข้อความทดสอบสำหรับกล้อง '{cam_name}' สำเร็จแล้ว!")
-            else:
-                messagebox.showerror("LINE Notify Test", "ส่งข้อความทดสอบล้มเหลว กรุณาตรวจสอบความถูกต้องของรหัส Token หรือสัญญาณเน็ตเวิร์ก")
-                
-        msg = f"\n🧪 [DPDF Camera Alert Test]\nการทดสอบเตือนภัยเฉพาะกล้อง: {cam_name.upper()}\n⏰ เวลาทดสอบ: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        send_line_notify_async(msg, token, callback=test_callback)
+                # Empty Camera Slot conforming to UX/UI Principle Section 9
+                slot = EmptyCameraSlot(self.grid_container, on_add_callback=self.add_camera)
+                slot.grid(row=r, column=c, sticky="nsew", padx=theme.SPACE_XS, pady=theme.SPACE_XS)
 
     def open_camera_settings(self, idx):
-        cfg = self.camera_configs[idx]
-        modal = tk.Toplevel(self)
-        modal.title("Camera Configuration")
-        modal.geometry("420x350")
-        modal.configure(bg="#0c0c0e")
-        modal.transient(self)
-        modal.grab_set()
-        modal.resizable(False, False)
-        
-        # UI inputs
-        tk.Label(modal, text="Camera Name:", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold")).pack(anchor="w", padx=20, pady=(20, 2))
-        ent_name = tk.Entry(modal, bg="#16161e", fg="#ffffff", bd=1)
-        ent_name.insert(0, cfg["name"])
-        ent_name.pack(fill="x", padx=20, pady=2)
-        
-        # Source Selection Dropdown
-        src_lbl_frame = ttk.Frame(modal)
-        src_lbl_frame.pack(fill="x", padx=20, pady=(10, 2))
-        tk.Label(src_lbl_frame, text="Select Camera Source:", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold")).pack(side="left")
-        tk.Button(
-            src_lbl_frame, text="❔", font=("Segoe UI", 8, "bold"), 
-            bg="#1e1e24", fg="#00f0ff", activebackground="#2a2a35", activeforeground="#00f0ff", 
-            bd=0, padx=5, pady=0, command=self.show_camera_source_help
-        ).pack(side="left", padx=5)
-        
-        # Build dropdown options based on detected cameras
-        choices = []
-        for cam_idx in self.available_cameras:
-            choices.append(f"Local Camera {cam_idx} (Detected)")
-        for cam_idx in range(5):
-            if cam_idx not in self.available_cameras:
-                choices.append(f"Local Camera {cam_idx}")
-        choices.append("IP Network Camera (RTSP URL)")
-        
-        # Determine initial selection
-        curr_src = str(cfg["source"])
-        initial_val = "IP Network Camera (RTSP URL)"
-        if curr_src.isdigit():
-            val_int = int(curr_src)
-            if val_int in self.available_cameras:
-                initial_val = f"Local Camera {val_int} (Detected)"
-            else:
-                initial_val = f"Local Camera {val_int}"
-                
-        combo_src = ttk.Combobox(modal, values=choices, state="readonly")
-        combo_src.set(initial_val)
-        combo_src.pack(fill="x", padx=20, pady=2)
-        
-        # Entry for custom RTSP URL
-        rtsp_lbl = tk.Label(modal, text="RTSP Stream URL:", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold"))
-        rtsp_lbl.pack(anchor="w", padx=20, pady=(5, 2))
-        
-        ent_src = tk.Entry(modal, bg="#16161e", fg="#ffffff", bd=1)
-        ent_src.pack(fill="x", padx=20, pady=2)
-        if not curr_src.isdigit():
-            ent_src.insert(0, curr_src)
-            
-        def on_source_changed(event):
-            selected = combo_src.get()
-            if "Local Camera" in selected:
-                ent_src.delete(0, "end")
-                ent_src.configure(state="disabled", background="#0c0c0e")
-            else:
-                ent_src.configure(state="normal", background="#16161e")
-                
-        combo_src.bind("<<ComboboxSelected>>", on_source_changed)
-        on_source_changed(None) # Call once to set initial state
-        
-        # LINE Notify settings per camera
-        token_lbl_frame = ttk.Frame(modal)
-        token_lbl_frame.pack(fill="x", padx=20, pady=(10, 2))
-        tk.Label(token_lbl_frame, text="LINE Notify Token เฉพาะกล้อง (ข้ามค่าหลัก):", bg="#0c0c0e", fg="#8a8a98", font=("Segoe UI", 9, "bold")).pack(side="left")
-        tk.Button(
-            token_lbl_frame, text="❔", font=("Segoe UI", 8, "bold"), 
-            bg="#1e1e24", fg="#00f0ff", activebackground="#2a2a35", activeforeground="#00f0ff", 
-            bd=0, padx=5, pady=0, command=self.show_line_token_help
-        ).pack(side="left", padx=5)
-        
-        token_entry_frame = ttk.Frame(modal)
-        token_entry_frame.pack(fill="x", padx=20, pady=2)
-        
-        ent_token = tk.Entry(token_entry_frame, bg="#16161e", fg="#ffffff", bd=1)
-        ent_token.insert(0, cfg.get("line_token", ""))
-        ent_token.pack(side="left", fill="x", expand=True)
-        
-        tk.Button(
-            token_entry_frame, text="🧪 ทดสอบ", font=("Segoe UI", 8, "bold"), 
-            bg="#1e1e24", fg="#f0f0f5", activebackground="#2a2a35", activeforeground="#ffffff", 
-            bd=0, padx=8, pady=2, command=lambda: self.test_camera_line_notify(ent_token.get().strip(), cfg["name"])
-        ).pack(side="left", padx=(5, 0))
-        
-        # Save Button
-        def do_save():
-            selected = combo_src.get()
-            if "Local Camera" in selected:
-                parts = selected.split()
-                final_source = parts[2]
-            else:
-                final_source = ent_src.get().strip()
-                if not final_source:
-                    messagebox.showerror("Error", "กรุณาระบุ RTSP URL สำหรับกล้องเน็ตเวิร์ก")
-                    return
-            self.save_camera_settings(modal, idx, ent_name.get(), final_source, ent_token.get())
-            
-        btn_save = tk.Button(
-            modal, text="Save Settings", font=("Segoe UI", 9, "bold"), bg="#00f0ff", fg="#000000", bd=0, pady=8,
-            command=do_save
-        )
-        btn_save.pack(fill="x", padx=20, pady=20)
-
-    def save_camera_settings(self, modal, idx, name, source, line_token):
-        name = name.strip() or f"Camera {idx+1}"
-        source = source.strip()
-        line_token = line_token.strip()
-        
-        # Stop stream if running
-        old_name = self.camera_configs[idx]["name"]
-        self.monitor.stop_camera_stream(old_name)
-            
-        self.camera_configs[idx]["name"] = name
-        self.camera_configs[idx]["source"] = source
-        self.camera_configs[idx]["line_token"] = line_token
-        self.save_camera_config()
-        modal.destroy()
-        self.rebuild_grid_view()
-        
-        # Restart stream
-        self.monitor.start_camera_stream(name, source)
+        CameraConfigDialog(self, self, idx)
 
     def add_camera(self):
         new_idx = len(self.camera_configs)
         if new_idx >= 4:
+            self.toast.show_alert("รองรับการเชื่อมต่อกล้องสูงสุด 4 ช่องสัญญาณพร้อมกัน", "warning", auto_hide_sec=3)
             return
-        self.camera_configs.append({"name": f"Camera {new_idx+1}", "source": "0", "line_token": ""})
+            
+        new_source = "0"
+        for cam_id in self.available_cameras:
+            if not any(str(c.get("source")) == str(cam_id) for c in self.camera_configs):
+                new_source = str(cam_id)
+                break
+                
+        self.camera_configs.append({
+            "name": f"Camera {new_idx+1}",
+            "source": new_source,
+            "line_token": ""
+        })
         self.save_camera_config()
         self.rebuild_grid_view()
+        self.monitor.start_camera_stream(f"Camera {new_idx+1}", new_source)
+        self.toast.show_alert(f"เพิ่มกล้อง Camera {new_idx+1} เรียบร้อยแล้ว", "success", auto_hide_sec=3)
 
     def delete_camera(self, idx):
         cfg = self.camera_configs[idx]
-        cam_name = cfg["name"]
+        cam_name = cfg.get("name", f"Camera {idx+1}")
         
-        self.monitor.stop_camera_stream(cam_name)
+        confirm = messagebox.askyesno(
+            "Confirm Remove Camera",
+            f"คุณแน่ใจหรือไม่ว่าต้องการปิดและนำกล้อง '{cam_name}' ออกจากระบบ?",
+            parent=self
+        )
+        if not confirm:
+            return
             
+        self.monitor.stop_camera_stream(cam_name)
         self.camera_configs.pop(idx)
         self.save_camera_config()
         self.rebuild_grid_view()
+        self.toast.show_alert(f"นำกล้อง '{cam_name}' ออกเรียบร้อยแล้ว", "info", auto_hide_sec=3)
 
     def auto_start_streams(self):
         self.monitor.stop_all_streams()
         for cfg in self.camera_configs:
-            name = cfg["name"]
-            source = cfg["source"]
-            self.monitor.start_camera_stream(name, source)
+            name = cfg.get("name", "")
+            source = cfg.get("source", "0")
+            if name:
+                self.monitor.start_camera_stream(name, source)
 
     def stop_all_streams(self):
         self.monitor.stop_all_streams()
@@ -529,7 +762,6 @@ class App(tk.Tk):
                         self.audio_alert_enabled = data.get("audio_alert_enabled", True)
                         return data.get("cameras", default_cameras)
                     elif isinstance(data, list):
-                        # Backward compatibility for old list-only config format
                         return [{"name": c["name"], "source": c["source"], "line_token": ""} for c in data]
             except Exception as e:
                 print(f"Error loading config: {e}")
@@ -540,23 +772,21 @@ class App(tk.Tk):
         fall_cam_name = ""
         
         for cfg in self.camera_configs:
-            cam_name = cfg["name"]
+            cam_name = cfg.get("name", "")
             if cam_name in self.active_streams:
                 stream = self.active_streams[cam_name]
                 frame = stream.last_frame
                 
-                if frame is not None:
+                if frame is not None and "label_widget" in cfg and cfg["label_widget"].winfo_exists():
                     w = cfg["label_widget"].winfo_width()
                     h = cfg["label_widget"].winfo_height()
-                    frame_resized = cv2.resize(frame, (w, h)) if w > 10 and h > 10 else cv2.resize(frame, (320, 240))
                     
-                    ret_val, png_data = cv2.imencode('.png', frame_resized)
-                    if ret_val:
-                        imgtk = tk.PhotoImage(data=png_data.tobytes())
-                        if "label_widget" in cfg and cfg["label_widget"].winfo_exists():
-                            cfg["label_widget"].imgtk = imgtk
-                            cfg["label_widget"].configure(image=imgtk)
-                            
+                    # Ultra-fast zero-compression frame conversion (12x faster than PNG)
+                    imgtk = convert_cv2_to_tk_image(frame, target_width=w, target_height=h)
+                    if imgtk:
+                        cfg["label_widget"].imgtk = imgtk
+                        cfg["label_widget"].configure(image=imgtk)
+                        
                 if stream.last_status == "FALL DETECTED":
                     any_fall = True
                     fall_cam_name = cam_name
@@ -571,35 +801,34 @@ class App(tk.Tk):
                         video_path = stream.save_fall_clip()
                         video_filename = os.path.basename(video_path)
                         
-                        # Determine token (camera override -> global token)
                         token = cfg.get("line_token", "").strip() or self.global_line_token
                         if token:
                             msg = f"\n🚨 แจ้งเตือนตรวจพบการล้ม!\n📷 กล้อง: {cam_name.upper()}\n⏰ เวลา: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n📂 บันทึกวิดีโอหลักฐาน: {video_filename}"
                             send_line_notify_async(msg, token)
-                    
+                            
         # Update Alert Banner & Audio Alert
         if any_fall:
-            self.alert_banner.configure(text=f"⚠️ WARNING! FALL DETECTED ON CAMERA: {fall_cam_name.upper()} ⚠️", bg="#ff0055", fg="#ffffff")
-            
-            # Sound alarm if enabled and cooldown passed (5 seconds)
+            self.toast.show_alert(f"⚠️ WARNING! FALL DETECTED ON CAMERA: {fall_cam_name.upper()} ⚠️", "danger")
             if self.audio_alert_enabled:
                 curr_t = time.time()
-                if curr_t - self.last_audio_alert_time > 5.0:
+                if curr_t - self.last_audio_alert_time > 4.0:
                     self.last_audio_alert_time = curr_t
-                    # Beep asynchronously in a separate thread so it doesn't block GUI
                     try:
                         import winsound
-                        threading.Thread(target=lambda: winsound.Beep(1000, 600), daemon=True).start()
+                        threading.Thread(target=lambda: winsound.Beep(1000, 500), daemon=True).start()
                     except Exception:
                         pass
         else:
-            self.alert_banner.configure(text="", bg="#0c0c0e")
-            
+            # Only clear if it's currently a danger alert
+            if self.toast.cget("bg") == theme.DANGER:
+                self.toast.clear()
+                
         self.after(33, self.update_gui_loop)
 
     def destroy(self):
         self.stop_all_streams()
         super().destroy()
+
 
 if __name__ == "__main__":
     app = App()

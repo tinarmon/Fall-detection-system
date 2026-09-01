@@ -1,3 +1,8 @@
+"""
+DPDF 3D System Setup Wizard
+Refactored and styled according to UXUI_Design_Principles.md
+"""
+
 import os
 import sys
 import zipfile
@@ -6,13 +11,27 @@ import subprocess
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 
+import theme
+from ui_components import (
+    AppFonts,
+    PrimaryButton,
+    SecondaryButton,
+    CardFrame
+)
+
+
 class InstallerApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("DPDF 3D System Setup")
-        self.geometry("500x380")
-        self.configure(bg="#0c0c0e")
+        self.title("DPDF 3D - System Setup Wizard")
+        self.geometry("540x440")
+        self.minsize(480, 380)
+        self.configure(bg=theme.BG_DARK)
         self.resizable(False, False)
+        
+        # Initialize fonts & theme
+        self.fonts = AppFonts.get(self)
+        theme.apply_ttk_theme(self)
         
         # Determine path of payload.zip
         if getattr(sys, 'frozen', False):
@@ -38,79 +57,97 @@ class InstallerApp(tk.Tk):
         self.setup_ui()
 
     def setup_ui(self):
-        # Styling
-        style = ttk.Style()
-        style.theme_use("clam")
-        style.configure(".", bg="#0c0c0e", foreground="#f0f0f5")
-        style.configure("TProgressbar", thickness=15, background="#00f0ff")
-        
         # Header Banner
-        header = tk.Label(
-            self, text="DPDF 3D SYSTEM SETUP WIZARD", 
-            font=("Segoe UI", 14, "bold"), bg="#121216", fg="#00f0ff", pady=15
-        )
-        header.pack(fill="x")
+        header = tk.Frame(self, bg=theme.SURFACE_CARD, padx=theme.SPACE_LG, pady=theme.SPACE_MD)
+        header.pack(fill="x", side="top")
         
-        # Description
+        lbl_title = tk.Label(
+            header, text="🛡️ DPDF 3D SYSTEM SETUP WIZARD", 
+            font=self.fonts.H2, bg=theme.SURFACE_CARD, fg=theme.PRIMARY
+        )
+        lbl_title.pack(anchor="w")
+        
+        lbl_subtitle = tk.Label(
+            header, text="โปรแกรมติดตั้งระบบตรวจจับและแจ้งเตือนก่อนการล้ม (Pre-Fall Detection 3D v2.0)", 
+            font=self.fonts.CAPTION, bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
+        )
+        lbl_subtitle.pack(anchor="w", pady=(theme.SPACE_XS, 0))
+        
+        # Main body container
+        body = tk.Frame(self, bg=theme.BG_DARK, padx=theme.SPACE_LG, pady=theme.SPACE_MD)
+        body.pack(fill="both", expand=True)
+        
+        # Description Card
+        desc_card = CardFrame(body)
+        desc_card.pack(fill="x", pady=(0, theme.SPACE_MD))
+        
         desc_text = (
-            "ระบบตรวจจับความเสี่ยงและพยากรณ์ก่อนการล้ม (Pre-Fall Detection 3D)\n"
-            "เวอร์ชัน 2.0 Standalone Desktop Application\n\n"
-            "ตัวติดตั้งนี้จะคลายพิกัดรันไทม์ Python พร้อมจำสร้าง Shortcut ปุ่มลัดบนหน้าจอหลัก"
+            "ตัวติดตั้งนี้จะทำการคัดลอกไฟล์ระบบรันไทม์ AI Model, ชุดคำนวณ 3D Pose Landmarker,\n"
+            "และสร้าง Shortcut ปุ่มลัดสำหรับเปิดใช้งานทันทีบนหน้าจอหลัก (Desktop)"
         )
-        desc = tk.Label(
-            self, text=desc_text, font=("Segoe UI", 9), 
-            bg="#0c0c0e", fg="#8a8a98", justify="left", pady=15
+        lbl_desc = tk.Label(
+            desc_card, text=desc_text, font=self.fonts.BODY, 
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY, justify="left"
         )
-        desc.pack(anchor="w", padx=25)
+        lbl_desc.pack(anchor="w")
         
-        # Path Selector Frame
-        path_frame = tk.Frame(self, bg="#0c0c0e")
-        path_frame.pack(fill="x", padx=25, pady=10)
+        # Installation Path Card
+        path_card = CardFrame(body)
+        path_card.pack(fill="x", pady=(0, theme.SPACE_MD))
         
-        tk.Label(
-            path_frame, text="ตำแหน่งติดตั้ง (Installation Folder):", 
-            font=("Segoe UI", 9, "bold"), bg="#0c0c0e", fg="#8a8a98"
-        ).pack(anchor="w")
+        lbl_path_title = tk.Label(
+            path_card, text="ตำแหน่งติดตั้งโปรแกรม (Installation Folder):", 
+            font=self.fonts.BODY_BOLD, bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY
+        )
+        lbl_path_title.pack(anchor="w", pady=(0, theme.SPACE_SM))
         
-        entry_frame = tk.Frame(path_frame, bg="#0c0c0e")
-        entry_frame.pack(fill="x", pady=5)
+        entry_row = tk.Frame(path_card, bg=theme.SURFACE_CARD)
+        entry_row.pack(fill="x")
         
         self.entry_path = tk.Entry(
-            entry_frame, textvariable=self.install_path_var, 
-            bg="#16161e", fg="#ffffff", font=("Segoe UI", 9), bd=1, insertbackground="#ffffff"
+            entry_row, textvariable=self.install_path_var, font=self.fonts.BODY,
+            bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY, insertbackground=theme.TEXT_PRIMARY,
+            bd=1, relief="solid", highlightthickness=0
         )
-        self.entry_path.pack(side="left", fill="x", expand=True, ipady=3)
+        self.entry_path.pack(side="left", fill="x", expand=True, ipady=4)
         
-        btn_browse = tk.Button(
-            entry_frame, text="Browse...", font=("Segoe UI", 9, "bold"), 
-            bg="#2a2a35", fg="#ffffff", activebackground="#3a3a48", activeforeground="#ffffff",
-            bd=0, padx=12, command=self.browse_folder
+        btn_browse = SecondaryButton(
+            entry_row, text="Browse...", command=self.browse_folder,
+            padx=theme.SPACE_MD, pady=theme.SPACE_XS
         )
-        btn_browse.pack(side="right", padx=(10, 0))
+        btn_browse.pack(side="right", padx=(theme.SPACE_SM, 0))
         
-        # Progress Bar & Status (Initially hidden)
-        self.progress_frame = tk.Frame(self, bg="#0c0c0e")
+        # Progress Card (Initially Hidden)
+        self.progress_card = CardFrame(body)
+        
         self.lbl_status = tk.Label(
-            self.progress_frame, text="พร้อมทำการติดตั้ง...", 
-            font=("Segoe UI", 9, "bold"), bg="#0c0c0e", fg="#00f0ff"
+            self.progress_card, text="พร้อมเริ่มการติดตั้ง...", 
+            font=self.fonts.BODY_BOLD, bg=theme.SURFACE_CARD, fg=theme.PRIMARY
         )
-        self.lbl_status.pack(anchor="w")
+        self.lbl_status.pack(anchor="w", pady=(0, theme.SPACE_XS))
         
-        self.progress = ttk.Progressbar(self.progress_frame, orient="horizontal", mode="determinate")
-        self.progress.pack(fill="x", pady=5)
+        self.progress = ttk.Progressbar(self.progress_card, orient="horizontal", mode="determinate")
+        self.progress.pack(fill="x", pady=(0, theme.SPACE_XS))
+        
+        self.lbl_pct = tk.Label(
+            self.progress_card, text="0%", font=self.fonts.CAPTION,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
+        )
+        self.lbl_pct.pack(anchor="e")
         
         # Action Buttons
-        self.btn_install = tk.Button(
-            self, text="🚀 เริ่มติดตั้งโปรแกรม (Install)", font=("Segoe UI", 10, "bold"),
-            bg="#00f0ff", fg="#000000", activebackground="#00d0e0", activeforeground="#000000",
-            bd=0, pady=10, command=self.start_installation
+        btn_bar = tk.Frame(body, bg=theme.BG_DARK)
+        btn_bar.pack(fill="x", side="bottom")
+        
+        self.btn_install = PrimaryButton(
+            btn_bar, text="🚀 เริ่มติดตั้งโปรแกรม (Install)", command=self.start_installation,
+            pady=theme.SPACE_SM
         )
-        self.btn_install.pack(fill="x", side="bottom", padx=25, pady=25)
+        self.btn_install.pack(fill="x")
 
     def browse_folder(self):
         folder = filedialog.askdirectory(parent=self, initialdir=self.install_path_var.get())
         if folder:
-            # Append /DPDF if the selected folder doesn't end with it
             folder = os.path.normpath(folder)
             if not folder.lower().endswith("dpdf"):
                 folder = os.path.join(folder, "DPDF")
@@ -119,67 +156,64 @@ class InstallerApp(tk.Tk):
     def start_installation(self):
         target_dir = self.install_path_var.get().strip()
         if not target_dir:
-            messagebox.showerror("Error", "กรุณาระบุตำแหน่งติดตั้งที่ถูกต้อง")
+            messagebox.showerror("Error", "กรุณาระบุตำแหน่งติดตั้งที่ถูกต้อง", parent=self)
             return
             
         if not os.path.exists(self.zip_path):
-            messagebox.showerror("Error", f"ไม่พบไฟล์ติดตั้งหลัก (payload.zip) ที่ตำแหน่ง: {self.zip_path}")
+            messagebox.showerror("Error", f"ไม่พบไฟล์ติดตั้งหลัก (payload.zip) ที่ตำแหน่ง: {self.zip_path}", parent=self)
             return
             
-        # UI updates to show installation progress
-        self.btn_install.configure(state="disabled", bg="#2e2e38", fg="#8a8a98")
-        self.entry_path.configure(state="disabled")
-        self.progress_frame.pack(fill="x", padx=25, side="bottom", before=self.btn_install)
+        self.btn_install.set_disabled(True)
+        self.entry_path.configure(state="disabled", bg=theme.SURFACE_CARD)
+        self.progress_card.pack(fill="x", pady=(0, theme.SPACE_MD), before=self.btn_install.master)
         
-        # Launch extraction inside background thread
         threading.Thread(target=self.install_task, args=(target_dir,), daemon=True).start()
 
     def install_task(self, dest_path):
         try:
-            self.update_status("กำลังเตรียมการติดตั้ง...")
+            self.update_status("กำลังเตรียมโครงสร้างโฟลเดอร์...")
             os.makedirs(dest_path, exist_ok=True)
             
-            # Read zip contents
             with zipfile.ZipFile(self.zip_path, 'r') as zip_ref:
                 file_list = zip_ref.namelist()
                 total_files = len(file_list)
                 
-                self.update_status(f"กำลังสกัดไฟล์ติดตั้งทั้งหมด ({total_files} ไฟล์)...")
+                self.update_status(f"กำลังติดตั้งไฟล์ระบบ ({total_files} รายการ)...")
                 
                 for idx, file_name in enumerate(file_list):
                     zip_ref.extract(file_name, dest_path)
                     
-                    # Update progress every 25 files
-                    if idx % 25 == 0 or idx == total_files - 1:
+                    if idx % 20 == 0 or idx == total_files - 1:
                         pct = int(((idx + 1) / total_files) * 100)
-                        self.update_progress(pct, f"กำลังติดตั้ง: {idx+1}/{total_files} ไฟล์")
+                        self.update_progress(pct, f"กำลังติดตั้ง: {idx+1}/{total_files} ไฟล์ ({pct}%)")
                         
-            # Create Windows Desktop Shortcut using PowerShell
-            self.update_status("กำลังสร้าง Shortcut ปุ่มลัดบนหน้าจอเดสก์ท็อป...")
+            self.update_status("กำลังสร้างปุ่มลัด Shortcut บน Desktop...")
             target_exe = os.path.join(dest_path, "DPDF.exe")
-            desktop = os.path.join(os.environ["USERPROFILE"], "Desktop")
+            desktop = os.path.join(os.environ.get("USERPROFILE", "C:\\"), "Desktop")
             shortcut_path = os.path.join(desktop, "DPDF.lnk")
             
             self.create_windows_shortcut(target_exe, shortcut_path)
             
-            self.update_status("ติดตั้งเสร็จสมบูรณ์เรียบร้อยแล้ว!")
+            self.update_progress(100, "การติดตั้งเสร็จสมบูรณ์เรียบร้อยแล้ว!")
             self.after(0, lambda: messagebox.showinfo(
                 "Installation Complete", 
                 "การติดตั้งระบบ DPDF 3D เสร็จสมบูรณ์แล้ว!\n\n"
-                "สามารถเปิดใช้งานได้ทันทีจากปุ่มลัด 'DPDF' บนเดสก์ท็อปของคุณ"
+                "สามารถเปิดใช้งานได้ทันทีจากปุ่มลัด 'DPDF' บนเดสก์ท็อปของคุณ",
+                parent=self
             ))
-            self.after(0, self.destroy)
+            self.after(500, self.destroy)
             
         except Exception as e:
             self.update_status(f"เกิดข้อผิดพลาดในการติดตั้ง: {e}")
-            self.after(0, lambda: messagebox.showerror("Installation Failed", f"การติดตั้งล้มเหลว: {e}"))
-            self.after(0, lambda: self.btn_install.configure(state="normal", bg="#00f0ff", fg="#000000"))
+            self.after(0, lambda: messagebox.showerror("Installation Failed", f"การติดตั้งล้มเหลว: {e}", parent=self))
+            self.after(0, lambda: self.btn_install.set_disabled(False))
 
     def update_status(self, text):
         self.after(0, lambda: self.lbl_status.configure(text=text))
 
     def update_progress(self, value, text):
         self.after(0, lambda: self.progress.configure(value=value))
+        self.after(0, lambda: self.lbl_pct.configure(text=f"{value}%"))
         self.after(0, lambda: self.lbl_status.configure(text=text))
 
     def create_windows_shortcut(self, target_exe, shortcut_path):
@@ -194,12 +228,13 @@ class InstallerApp(tk.Tk):
         try:
             subprocess.run(
                 ["powershell", "-Command", ps_cmd], 
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
         except Exception as e:
             print(f"Error creating shortcut: {e}")
+
 
 if __name__ == "__main__":
     app = InstallerApp()
