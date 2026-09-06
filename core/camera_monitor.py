@@ -91,7 +91,11 @@ class CameraStream:
         self.last_status = "CONNECTING"
         self.sequence_buffer = deque(maxlen=config.TIME_STEPS)
         
-        self.thread = None
+        self._raw_frame = None
+        self._raw_frame_lock = threading.Lock()
+        self._new_frame_event = threading.Event()
+        self._reader_thread = None
+        self._worker_thread = None
         self.fall_recorder = FallRecorder()
         
         # Resolve numeric source index for USB webcams
@@ -106,16 +110,22 @@ class CameraStream:
             self.is_running = True
             self.connection_status = "CONNECTING"
             self.status_detail = "Connecting to video source..."
-            self.thread = threading.Thread(target=self._run_loop, daemon=True)
-            self.thread.start()
+            self._reader_thread = threading.Thread(target=self._reader_loop, daemon=True, name=f"{self.name}-Reader")
+            self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True, name=f"{self.name}-Worker")
+            self._reader_thread.start()
+            self._worker_thread.start()
 
     def stop(self):
         self.is_running = False
         self.connection_status = "OFFLINE"
         self.is_online = False
-        if self.thread:
-            self.thread.join(timeout=1.0)
-            self.thread = None
+        self._new_frame_event.set()
+        if self._reader_thread:
+            self._reader_thread.join(timeout=1.0)
+            self._reader_thread = None
+        if self._worker_thread:
+            self._worker_thread.join(timeout=1.0)
+            self._worker_thread = None
         self._release_cap()
 
     def _release_cap(self):
@@ -153,15 +163,12 @@ class CameraStream:
             
         return None
 
-    def _run_loop(self):
-        global shared_model
-        
-        estimator = PoseEstimator()
-        calculator = AngleCalculator()
-        ui = UIManager()
-        
-        frame_counter = 0
-        fps_time = time.time()
+    def _reader_loop(self):
+        """
+        Dedicated zero-lag frame reader thread.
+        Continuously pulls frames from cap.read() at camera frame rate without any AI/processing delay,
+        instantly draining FFmpeg's TCP buffer to eliminate lag accumulation and prevent deadlocks.
+        """
         last_reconnect_attempt = 0.0
         
         while self.is_running:
@@ -172,65 +179,101 @@ class CameraStream:
                     last_reconnect_attempt = now
                     self.retry_count += 1
                     self.connection_status = "CONNECTING" if self.retry_count <= 1 else "RECONNECTING"
-                    self.status_detail = f"Attempting connection (Attempt #{self.retry_count})..."
+                    self.status_detail = f"Attempting connection #{self.retry_count}..."
                     self.cap = self._open_capture()
-                    
                     if not self.cap or not self.cap.isOpened():
                         self.is_online = False
-                        # Generate high-tech no-signal placeholder frame
-                        self.last_frame = ui.generate_no_signal_frame(
-                            self.width, self.height, self.name, 
-                            f"{self.connection_status} (#{self.retry_count})",
-                            detail=str(self.source)
-                        )
                         time.sleep(0.5)
                         continue
                 else:
-                    time.sleep(0.1)
+                    time.sleep(0.05)
                     continue
-                    
-            # 2. Frame Read with Zero-Lag Grab
+
+            # 2. Read frame immediately
             try:
                 ret, frame = self.cap.read()
             except Exception as ex:
                 print(f"[{self.name}] Exception reading frame: {ex}")
                 ret, frame = False, None
+
+            if ret and frame is not None and frame.size > 0:
+                self.last_frame_time = time.time()
+                self.is_online = True
+                self.connection_status = "ONLINE"
+                self.retry_count = 0
                 
-            # Handle frame drop / stream stall
-            if not ret or frame is None or frame.size == 0:
-                self.is_online = False
+                with self._raw_frame_lock:
+                    self._raw_frame = frame
+                self._new_frame_event.set()
+            else:
+                # Frame drop or network blip
                 now = time.time()
-                if now - self.last_frame_time > 3.0:
-                    # Stream timed out -> trigger reconnection
+                if self.is_online and (now - self.last_frame_time > 3.5):
+                    self.is_online = False
                     self.connection_status = "RECONNECTING"
                     self.status_detail = "Frame reception timed out. Reconnecting..."
                     self._release_cap()
-                    self.last_frame = ui.generate_no_signal_frame(
-                        self.width, self.height, self.name, "NO SIGNAL / RECONNECTING...",
-                        detail=str(self.source)
-                    )
-                time.sleep(0.02)
+                time.sleep(0.005)
+
+        self._release_cap()
+
+    def _worker_loop(self):
+        """
+        Dedicated AI inference & Cyberpunk HUD Rendering Thread.
+        Pulls latest raw frame, runs downsampled Pose Estimation, 3D angle geometry,
+        GRU fall classification inference, and telemetry overlays.
+        """
+        global shared_model
+        
+        estimator = PoseEstimator()
+        calculator = AngleCalculator()
+        ui = UIManager()
+        
+        frame_counter = 0
+        fps_time = time.time()
+        
+        while self.is_running:
+            has_new = self._new_frame_event.wait(timeout=0.1)
+            if not self.is_running:
+                break
+
+            if not self.is_online or self._raw_frame is None:
+                # Telemetry placeholder when connecting or offline
+                self.last_frame = ui.generate_no_signal_frame(
+                    self.width, self.height, self.name,
+                    f"{self.connection_status} (#{self.retry_count})",
+                    detail=str(self.source)
+                )
+                time.sleep(0.05)
                 continue
-                
-            # Connection is healthy and online
-            self.last_frame_time = time.time()
-            self.is_online = True
-            self.connection_status = "ONLINE"
-            self.retry_count = 0
-            
+
+            frame = None
+            if has_new:
+                self._new_frame_event.clear()
+                with self._raw_frame_lock:
+                    if self._raw_frame is not None:
+                        frame = self._raw_frame.copy()
+            else:
+                time.sleep(0.01)
+                continue
+
+            if frame is None or frame.size == 0:
+                continue
+
             curr_time = time.time()
-            self.fps = 1.0 / (curr_time - fps_time) if (curr_time - fps_time) > 0 else 30.0
+            dt = curr_time - fps_time
+            self.fps = 1.0 / dt if dt > 0 else 30.0
             fps_time = curr_time
-            
-            # 3. AI Pose Estimation
+
+            # 1. AI Pose Estimation
             processed_frame, points_px, points_norm, points_world = estimator.process_frame(frame)
             if processed_frame is None or processed_frame.size == 0:
                 processed_frame = frame.copy()
-                
+
             is_valid_pose = False
             left_angle, right_angle = 0.0, 0.0
             bbox = None
-            
+
             if points_px:
                 xs = [p[0] for p in points_px.values()]
                 ys = [p[1] for p in points_px.values()]
@@ -238,22 +281,22 @@ class CameraStream:
                 min_x, max_x = max(0, min(xs) - 50), min(w, max(xs) + 50)
                 min_y, max_y = max(0, min(ys) - 100), min(h, max(ys) + 50)
                 bbox = (min_x, min_y, max_x, max_y)
-                
+
                 if all(k in points_px for k in config.TARGET_LANDMARKS) and all(k in points_world for k in config.TARGET_LANDMARKS):
                     is_valid_pose = True
                     left_angle = calculator.calculate_angle_3d(points_world[11], points_world[23], points_world[25])
                     right_angle = calculator.calculate_angle_3d(points_world[12], points_world[24], points_world[26])
-                    
+
             prediction = 0.0
             status_text = "NORMAL"
             theme_color = (0, 255, 0)
-            
-            # 4. Fall Prediction Model Inference
+
+            # 2. Fall Prediction Model Inference
             if is_valid_pose:
                 features = [left_angle / 180.0, right_angle / 180.0]
                 rel_features = estimator.get_relative_features(points_norm)
                 features.extend(rel_features)
-                
+
                 self.sequence_buffer.append(features)
                 if shared_model and len(self.sequence_buffer) == config.TIME_STEPS:
                     if frame_counter % 3 == 0:
@@ -265,14 +308,14 @@ class CameraStream:
                         prediction = self.last_prediction
                 else:
                     prediction = 0.0
-                    
+
                 frame_counter += 1
-                
+
                 if prediction > self.monitor.app.fall_threshold:
                     status_text = "FALL DETECTED"
                     theme_color = (0, 0, 255)
-                            
-            # 5. Render HUD & Angles
+
+            # 3. Render HUD & Angles
             processed_frame = ui.draw_hud(
                 frame=processed_frame,
                 tester_name=self.name,
@@ -285,13 +328,11 @@ class CameraStream:
             )
             if is_valid_pose:
                 processed_frame = ui.draw_angles(processed_frame, points_px, left_angle, right_angle)
-                
+
             self.last_prediction = prediction
             self.last_status = status_text
             self.last_frame = processed_frame
             self.fall_recorder.write_frame(processed_frame)
-            
-        self._release_cap()
 
     def save_fall_clip(self):
         fps_val = self.fps if self.fps > 0 else 30.0

@@ -16,10 +16,17 @@ class FallRecorder:
         # Ensure output dir exists
         os.makedirs(self.output_dir, exist_ok=True)
 
-    def write_frame(self, frame):
-        if frame is not None:
+    def write_frame(self, frame, max_w=640):
+        if frame is not None and frame.size > 0:
+            h, w = frame.shape[:2]
+            if w > max_w:
+                scale = max_w / float(w)
+                new_h = int(h * scale)
+                frame_to_store = cv2.resize(frame, (max_w, new_h), interpolation=cv2.INTER_NEAREST)
+            else:
+                frame_to_store = frame.copy()
             with self.lock:
-                self.frame_buffer.append(frame.copy())
+                self.frame_buffer.append(frame_to_store)
 
     def save_recording(self, cam_name, width, height, fps=30.0):
         # Create output filename using current Unix timestamp

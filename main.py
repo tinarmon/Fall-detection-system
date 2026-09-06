@@ -242,6 +242,14 @@ class CameraConfigDialog(BaseModalDialog):
         )
         lbl_rtsp.pack(side="left")
 
+        self.btn_switch_s2 = tk.Button(
+            header_rtsp, text="⚡ ใช้ /stream2 (แนะนำ)", font=fonts.CAPTION,
+            bg=theme.SURFACE_ELEVATED, fg=theme.PRIMARY, activebackground=theme.SURFACE_HOVER,
+            activeforeground=theme.PRIMARY, bd=1, relief="solid", cursor="hand2",
+            command=self.switch_to_stream2
+        )
+        self.btn_switch_s2.pack(side="right")
+
         rtsp_entry_bar = tk.Frame(card_src, bg=theme.SURFACE_CARD)
         rtsp_entry_bar.pack(fill="x")
 
@@ -358,6 +366,24 @@ class CameraConfigDialog(BaseModalDialog):
             
         threading.Thread(target=worker, daemon=True).start()
 
+    def switch_to_stream2(self):
+        curr = self.ent_rtsp.get().strip()
+        if "/stream1" in curr:
+            curr = curr.replace("/stream1", "/stream2")
+        elif not curr:
+            curr = "rtsp://username:password@192.168.1.100:554/stream2"
+        elif not curr.endswith("/stream2"):
+            if curr.endswith("/"):
+                curr += "stream2"
+            else:
+                curr += "/stream2"
+        self.ent_rtsp.delete(0, tk.END)
+        self.ent_rtsp.insert(0, curr)
+        self.lbl_src_status.configure(
+            text="💡 ปรับเป็น /stream2 (Sub-stream) เรียบร้อยแล้ว แนะนำสำหรับ AI ป้องกันภาพค้าง",
+            fg=theme.PRIMARY
+        )
+
     def test_rtsp_stream(self):
         url = self.ent_rtsp.get().strip()
         if not url:
@@ -372,11 +398,32 @@ class CameraConfigDialog(BaseModalDialog):
             def update_ui():
                 self.btn_test_rtsp.configure(state="normal", text="🧪 ทดสอบสตรีม")
                 if success:
-                    self.lbl_src_status.configure(text=f"✅ เชื่อมต่อสำเร็จ! ความละเอียด: {res}", fg=theme.SUCCESS)
-                    messagebox.showinfo("RTSP Stream Test", f"✅ เชื่อมต่อสตรีม RTSP สำเร็จ!\nความละเอียดสัญญาณ: {res}", parent=self)
+                    if "/stream1" in url:
+                        self.lbl_src_status.configure(text=f"✅ สัญญาณติด ({res}) | 💡 แนะนำสลับเป็น /stream2", fg=theme.WARNING)
+                        messagebox.showinfo(
+                            "RTSP Stream Test",
+                            f"✅ เชื่อมต่อสตรีม RTSP สำเร็จ!\nความละเอียดสัญญาณ: {res}\n\n"
+                            "💡 คำแนะนำสำคัญ:\n"
+                            "ลิงก์นี้เป็น /stream1 (Main stream ความละเอียดสูง)\n"
+                            "หากต้องการความลื่นไหลสูงสุด ป้องกัน WiFi กระตุก หรือภาพค้างเมื่อเปิดนานๆ\n"
+                            "แนะนำให้กดปุ่ม '⚡ ใช้ /stream2' เพื่อใช้ Sub-stream ซึ่งเหมาะกับการวิเคราะห์ AI แบบเรียลไทม์มากกว่าครับ",
+                            parent=self
+                        )
+                    else:
+                        self.lbl_src_status.configure(text=f"✅ เชื่อมต่อสำเร็จ! ความละเอียด: {res}", fg=theme.SUCCESS)
+                        messagebox.showinfo("RTSP Stream Test", f"✅ เชื่อมต่อสตรีม RTSP สำเร็จ!\nความละเอียดสัญญาณ: {res}", parent=self)
                 else:
                     self.lbl_src_status.configure(text=f"❌ เชื่อมต่อไม่สำเร็จ: {msg}", fg=theme.DANGER)
-                    messagebox.showerror("RTSP Stream Test", f"❌ เชื่อมต่อสตรีมไม่สำเร็จ:\n{msg}\n\nคำแนะนำ:\n1. ตรวจสอบ IP และ Port (เช่น 554)\n2. ตรวจสอบ Username และ Password ของกล้อง\n3. ตรวจสอบว่ากล้องเปิดโหมด ONVIF/RTSP ในแอปผู้ผลิตแล้ว", parent=self)
+                    messagebox.showerror(
+                        "RTSP Stream Test",
+                        f"❌ เชื่อมต่อสตรีมไม่สำเร็จ:\n{msg}\n\n"
+                        "คำแนะนำ:\n"
+                        "1. ตรวจสอบ IP และ Port (เช่น 554)\n"
+                        "2. ตรวจสอบ Username และ Password ของกล้อง\n"
+                        "3. ตรวจสอบว่ากล้องเปิดโหมด ONVIF/RTSP ในแอปผู้ผลิตแล้ว\n"
+                        "4. หากกล้องค้างหรือเชื่อมไม่ติด แนะนำให้ลองกด '⚡ ใช้ /stream2' (Sub-stream)",
+                        parent=self
+                    )
             self.after(0, update_ui)
             
         threading.Thread(target=worker, daemon=True).start()
@@ -389,7 +436,9 @@ class CameraConfigDialog(BaseModalDialog):
             "   - หากเพิ่งเสียบสาย ให้กดปุ่ม '🔄 สแกนหากล้องต่อตรง'\n\n"
             "2. กล้องวงจรปิด IP Network Camera (RTSP):\n"
             "   - เลือก 'IP Network Camera' แล้วกรอก URL สตรีม เช่น:\n"
-            "   rtsp://username:password@192.168.1.100:554/stream1\n"
+            "   rtsp://username:password@192.168.1.100:554/stream2\n"
+            "   - 💡 แนะนำช่องสัญญาณ Sub-stream (/stream2) เพื่อความลื่นไหลสูงสุด ไม่ค้าง และใช้แบนด์วิธ WiFi ต่ำมาก\n"
+            "   - ระบบมีปุ่มลัด '⚡ ใช้ /stream2' สำหรับสลับพอร์ตอัตโนมัติ\n"
             "   - กดปุ่ม '🧪 ทดสอบสตรีม' เพื่อตรวจสอบภาพก่อนบันทึก"
         )
         messagebox.showinfo("คู่มือแหล่งสัญญาณกล้อง", msg, parent=self)
@@ -805,7 +854,7 @@ class App(tk.Tk):
                 break
                 
         if not assigned and not self.available_cameras:
-            new_source = "rtsp://username:password@192.168.1.100:554/stream1"
+            new_source = "rtsp://username:password@192.168.1.100:554/stream2"
                 
         self.camera_configs.append({
             "name": f"Camera {new_idx+1}",
