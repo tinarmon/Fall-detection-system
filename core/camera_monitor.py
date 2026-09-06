@@ -223,11 +223,14 @@ class CameraStream:
         Pulls latest raw frame, runs downsampled Pose Estimation, 3D angle geometry,
         GRU fall classification inference, and telemetry overlays.
         """
-        global shared_model
-        
-        estimator = PoseEstimator()
-        calculator = AngleCalculator()
         ui = UIManager()
+        estimator = None
+        try:
+            estimator = PoseEstimator()
+        except Exception as ex:
+            print(f"[{self.name}] Warning: Failed to initialize PoseEstimator: {ex}")
+            
+        calculator = AngleCalculator()
         
         frame_counter = 0
         fps_time = time.time()
@@ -266,7 +269,17 @@ class CameraStream:
             fps_time = curr_time
 
             # 1. AI Pose Estimation
-            processed_frame, points_px, points_norm, points_world = estimator.process_frame(frame)
+            if estimator is not None:
+                try:
+                    processed_frame, points_px, points_norm, points_world = estimator.process_frame(frame)
+                except Exception as ex:
+                    print(f"[{self.name}] Error in process_frame: {ex}")
+                    processed_frame = frame.copy()
+                    points_px, points_norm, points_world = {}, {}, {}
+            else:
+                processed_frame = frame.copy()
+                points_px, points_norm, points_world = {}, {}, {}
+
             if processed_frame is None or processed_frame.size == 0:
                 processed_frame = frame.copy()
 
@@ -366,7 +379,7 @@ class CameraMonitor:
         return available
 
     @staticmethod
-    def test_stream_connection(source, timeout_sec=4.0):
+    def test_stream_connection(source, timeout_sec=6.0):
         """
         Quick synchronous probe to test a camera source or RTSP stream.
         Returns: (success: bool, message: str, resolution: str)
@@ -377,6 +390,7 @@ class CameraMonitor:
                 backend = cv2.CAP_DSHOW if os.name == 'nt' else 0
                 cap = cv2.VideoCapture(src_val, backend)
             else:
+                os.environ["OPENCV_FFMPEG_RTSP_TRANSPORT"] = "tcp"
                 src_val = str(source).strip()
                 cap = cv2.VideoCapture(src_val, cv2.CAP_FFMPEG)
                 if hasattr(cv2, 'CAP_PROP_OPEN_TIMEOUT_MSEC'):

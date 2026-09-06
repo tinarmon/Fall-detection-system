@@ -166,6 +166,18 @@ def build():
     with open(manual_path, "w", encoding="utf-8") as f:
         f.write(manual_content)
         
+    # Copy assets directly into dist/DPDF/assets for full path redundancy
+    dest_assets = os.path.join(dist_dir, "DPDF", "assets")
+    src_assets = os.path.join(project_dir, "assets")
+    if os.path.exists(src_assets):
+        print("Copying assets directory directly to dist/DPDF/assets...")
+        shutil.copytree(src_assets, dest_assets, dirs_exist_ok=True)
+
+    # Copy OpenCV FFmpeg DLL directly to dist/DPDF root for Windows LoadLibrary resolution
+    cv2_dll_src = os.path.join(dist_dir, "DPDF", "_internal", "cv2", "opencv_videoio_ffmpeg4130_64.dll")
+    if os.path.exists(cv2_dll_src):
+        shutil.copy2(cv2_dll_src, os.path.join(dist_dir, "DPDF", "opencv_videoio_ffmpeg4130_64.dll"))
+        
     # Compress dist/DPDF workspace into payload.zip
     zip_path = os.path.join(project_dir, "payload.zip")
     if os.path.exists(zip_path):

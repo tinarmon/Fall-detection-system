@@ -6,6 +6,9 @@ Refactored and optimized according to UXUI_Design_Principles.md
 import os
 import sys
 
+# Force OpenCV FFmpeg backend to use TCP transport for all RTSP streams
+os.environ["OPENCV_FFMPEG_RTSP_TRANSPORT"] = "tcp"
+
 # Catch and mock matplotlib if missing to prevent MediaPipe drawing_utils static import crash
 try:
     import matplotlib
@@ -394,7 +397,7 @@ class CameraConfigDialog(BaseModalDialog):
         self.lbl_src_status.configure(text="กำลังส่งคำขอเชื่อมต่อ RTSP over TCP...", fg=theme.PRIMARY)
         
         def worker():
-            success, msg, res = CameraMonitor.test_stream_connection(url, timeout_sec=4.0)
+            success, msg, res = CameraMonitor.test_stream_connection(url, timeout_sec=6.0)
             def update_ui():
                 self.btn_test_rtsp.configure(state="normal", text="🧪 ทดสอบสตรีม")
                 if success:
@@ -570,7 +573,7 @@ class App(tk.Tk):
         theme.apply_ttk_theme(self)
         
         # Load window icon
-        icon_path = os.path.join(config.BASE_DIR, "assets", "icon.png")
+        icon_path = os.path.join(config.ASSETS_DIR, "icon.png")
         if os.path.exists(icon_path):
             try:
                 self.iconphoto(True, tk.PhotoImage(file=icon_path))

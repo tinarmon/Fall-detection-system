@@ -1,15 +1,29 @@
 import os
 import sys
 
-# Automatically define the base directory relative to this config file or execution file
+# Automatically define directories relative to execution environment
 if getattr(sys, 'frozen', False):
-    # Running as compiled .exe
-    BASE_DIR = os.path.dirname(sys.executable)
+    # Running as compiled .exe (PyInstaller onedir/onefile)
+    EXE_DIR = os.path.dirname(sys.executable)
+    MEIPASS_DIR = getattr(sys, '_MEIPASS', os.path.join(EXE_DIR, '_internal'))
+    
+    # Locate assets: search MEIPASS (_internal), then EXE directory
+    if os.path.isdir(os.path.join(MEIPASS_DIR, "assets")):
+        ASSETS_DIR = os.path.join(MEIPASS_DIR, "assets")
+    elif os.path.isdir(os.path.join(EXE_DIR, "assets")):
+        ASSETS_DIR = os.path.join(EXE_DIR, "assets")
+    elif os.path.isdir(os.path.join(EXE_DIR, "_internal", "assets")):
+        ASSETS_DIR = os.path.join(EXE_DIR, "_internal", "assets")
+    else:
+        ASSETS_DIR = os.path.join(MEIPASS_DIR, "assets")
+        
+    BASE_DIR = EXE_DIR
 else:
     # Running in Python development
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    ASSETS_DIR = os.path.join(BASE_DIR, "assets")
+    EXE_DIR = BASE_DIR
 
-ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 DATA_DIR = os.path.join(BASE_DIR, "data")
 RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
 CLEAN_DATA_DIR = os.path.join(DATA_DIR, "clean")
