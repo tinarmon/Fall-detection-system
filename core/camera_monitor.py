@@ -241,129 +241,156 @@ class CameraStream:
         fps_time = time.time()
         
         while self.is_running:
-            has_new = self._new_frame_event.wait(timeout=0.1)
-            if not self.is_running:
-                break
+            try:
+                has_new = self._new_frame_event.wait(timeout=0.1)
+                if not self.is_running:
+                    break
 
-            if not self.is_online or self._raw_frame is None:
-                # Telemetry placeholder when connecting or offline
-                self.last_frame = ui.generate_no_signal_frame(
-                    self.width, self.height, self.name,
-                    f"{self.connection_status} (#{self.retry_count})",
-                    detail=str(self.source)
-                )
-                time.sleep(0.05)
-                continue
+                if not self.is_online or self._raw_frame is None:
+                    # Telemetry placeholder when connecting or offline
+                    self.last_frame = ui.generate_no_signal_frame(
+                        self.width, self.height, self.name,
+                        f"{self.connection_status} (#{self.retry_count})",
+                        detail=str(self.source)
+                    )
+                    time.sleep(0.05)
+                    continue
 
-            frame = None
-            if has_new:
-                self._new_frame_event.clear()
-                with self._raw_frame_lock:
-                    if self._raw_frame is not None:
-                        frame = self._raw_frame.copy()
-            else:
-                time.sleep(0.01)
-                continue
+                frame = None
+                if has_new:
+                    self._new_frame_event.clear()
+                    with self._raw_frame_lock:
+                        if self._raw_frame is not None:
+                            frame = self._raw_frame.copy()
+                else:
+                    time.sleep(0.01)
+                    continue
 
-            if frame is None or frame.size == 0:
-                continue
+                if frame is None or frame.size == 0:
+                    continue
 
-            curr_time = time.time()
-            dt = curr_time - fps_time
-            self.fps = 1.0 / dt if dt > 0 else 30.0
-            fps_time = curr_time
+                curr_time = time.time()
+                dt = curr_time - fps_time
+                self.fps = 1.0 / dt if dt > 0 else 30.0
+                fps_time = curr_time
 
-            # 1. AI Pose Estimation
-            if estimator is not None:
-                try:
-                    processed_frame, points_px, points_norm, points_world = estimator.process_frame(frame)
+                # 1. AI Pose Estimation
+                if estimator is not None:
+                    try:
+                        processed_frame, points_px, points_norm, points_world = estimator.process_frame(frame)
+                        if frame_counter % 60 == 0:
+                            import logging
+                            logging.info(f"[{self.name}] Frame {frame_counter}: landmarks detected={len(points_px)}")
+                    except Exception as ex:
+                        import logging
+                        logging.error(f"[{self.name}] Error in process_frame: {ex}", exc_info=True)
+                        print(f"[{self.name}] Error in process_frame: {ex}")
+                        processed_frame = frame.copy()
+                        points_px, points_norm, points_world = {}, {}, {}
+                else:
                     if frame_counter % 60 == 0:
                         import logging
-                        logging.info(f"[{self.name}] Frame {frame_counter}: landmarks detected={len(points_px)}")
-                except Exception as ex:
-                    import logging
-                    logging.error(f"[{self.name}] Error in process_frame: {ex}", exc_info=True)
-                    print(f"[{self.name}] Error in process_frame: {ex}")
+                        logging.warning(f"[{self.name}] Frame {frame_counter}: estimator is None, attempting re-initialization...")
+                        try:
+                            estimator = PoseEstimator()
+                            logging.info(f"[{self.name}] PoseEstimator successfully re-initialized!")
+                        except Exception as ex:
+                            logging.error(f"[{self.name}] PoseEstimator re-initialization failed: {ex}")
                     processed_frame = frame.copy()
                     points_px, points_norm, points_world = {}, {}, {}
-            else:
-                if frame_counter % 60 == 0:
-                    import logging
-                    logging.warning(f"[{self.name}] Frame {frame_counter}: estimator is None, attempting re-initialization...")
-                    try:
-                        estimator = PoseEstimator()
-                        logging.info(f"[{self.name}] PoseEstimator successfully re-initialized!")
-                    except Exception as ex:
-                        logging.error(f"[{self.name}] PoseEstimator re-initialization failed: {ex}")
-                processed_frame = frame.copy()
-                points_px, points_norm, points_world = {}, {}, {}
 
-            if processed_frame is None or processed_frame.size == 0:
-                processed_frame = frame.copy()
+                if processed_frame is None or processed_frame.size == 0:
+                    processed_frame = frame.copy()
 
-            is_valid_pose = False
-            left_angle, right_angle = 0.0, 0.0
-            bbox = None
+                is_valid_pose = False
+                left_angle, right_angle = 0.0, 0.0
+                bbox = None
 
-            if points_px:
-                xs = [p[0] for p in points_px.values()]
-                ys = [p[1] for p in points_px.values()]
-                h, w, _ = processed_frame.shape
-                min_x, max_x = max(0, min(xs) - 50), min(w, max(xs) + 50)
-                min_y, max_y = max(0, min(ys) - 100), min(h, max(ys) + 50)
-                bbox = (min_x, min_y, max_x, max_y)
+                if points_px:
+                    xs = [p[0] for p in points_px.values()]
+                    ys = [p[1] for p in points_px.values()]
+                    h, w, _ = processed_frame.shape
+                    min_x, max_x = max(0, min(xs) - 50), min(w, max(xs) + 50)
+                    min_y, max_y = max(0, min(ys) - 100), min(h, max(ys) + 50)
+                    bbox = (min_x, min_y, max_x, max_y)
 
-                if all(k in points_px for k in config.TARGET_LANDMARKS) and all(k in points_world for k in config.TARGET_LANDMARKS):
-                    is_valid_pose = True
-                    left_angle = calculator.calculate_angle_3d(points_world[11], points_world[23], points_world[25])
-                    right_angle = calculator.calculate_angle_3d(points_world[12], points_world[24], points_world[26])
+                    if all(k in points_px for k in config.TARGET_LANDMARKS) and all(k in points_world for k in config.TARGET_LANDMARKS):
+                        is_valid_pose = True
+                        left_angle = calculator.calculate_angle_3d(points_world[11], points_world[23], points_world[25])
+                        right_angle = calculator.calculate_angle_3d(points_world[12], points_world[24], points_world[26])
 
-            prediction = 0.0
-            status_text = "NORMAL"
-            theme_color = (0, 255, 0)
+                prediction = 0.0
+                status_text = "NORMAL"
+                theme_color = (0, 255, 0)
 
-            # 2. Fall Prediction Model Inference
-            if is_valid_pose:
-                features = [left_angle / 180.0, right_angle / 180.0]
-                rel_features = estimator.get_relative_features(points_norm)
-                features.extend(rel_features)
+                # 2. Fall Prediction Model Inference
+                if is_valid_pose:
+                    # Dynamic feature dimension adaptation matching the loaded GRU model (14 or 20)
+                    expected_dim = shared_model.input_shape[-1] if (shared_model is not None and hasattr(shared_model, 'input_shape') and shared_model.input_shape) else 14
 
-                self.sequence_buffer.append(features)
-                if shared_model and len(self.sequence_buffer) == config.TIME_STEPS:
-                    if frame_counter % 3 == 0:
-                        input_data = np.array(self.sequence_buffer).reshape(1, config.TIME_STEPS, len(features))
-                        with model_lock:
-                            pred_val = shared_model.predict(input_data, verbose=0)[0][0]
-                        prediction = float(pred_val)
+                    if expected_dim == 14:
+                        features = [left_angle / 180.0, right_angle / 180.0]
+                        for target in config.TARGET_LANDMARKS:
+                            features.extend([points_norm[target][0], points_norm[target][1]])
+                    elif expected_dim == 20:
+                        features = [left_angle / 180.0, right_angle / 180.0]
+                        rel_features = estimator.get_relative_features(points_norm)
+                        features.extend(rel_features)
                     else:
-                        prediction = self.last_prediction
-                else:
-                    prediction = 0.0
+                        features = [left_angle / 180.0, right_angle / 180.0]
+                        for target in config.TARGET_LANDMARKS:
+                            features.extend([points_norm[target][0], points_norm[target][1]])
+                        if len(features) < expected_dim:
+                            features.extend([0.0] * (expected_dim - len(features)))
+                        elif len(features) > expected_dim:
+                            features = features[:expected_dim]
 
-                frame_counter += 1
+                    self.sequence_buffer.append(features)
+                    if shared_model and len(self.sequence_buffer) == config.TIME_STEPS:
+                        if frame_counter % 3 == 0:
+                            try:
+                                input_data = np.array(self.sequence_buffer, dtype=np.float32).reshape(1, config.TIME_STEPS, expected_dim)
+                                with model_lock:
+                                    pred_val = shared_model(input_data, training=False).numpy()[0][0]
+                                prediction = float(pred_val)
+                            except Exception as pred_err:
+                                import logging
+                                logging.error(f"[{self.name}] Error during model inference: {pred_err}", exc_info=True)
+                                prediction = self.last_prediction
+                        else:
+                            prediction = self.last_prediction
+                    else:
+                        prediction = 0.0
 
-                if prediction > self.monitor.app.fall_threshold:
-                    status_text = "FALL DETECTED"
-                    theme_color = (0, 0, 255)
+                    frame_counter += 1
 
-            # 3. Render HUD & Angles
-            processed_frame = ui.draw_hud(
-                frame=processed_frame,
-                tester_name=self.name,
-                fps=self.fps,
-                status_text=status_text,
-                prediction=prediction,
-                theme_color=theme_color,
-                bbox=bbox,
-                source_label=f"{self.source}" if isinstance(self.source, int) else "RTSP IP STREAM"
-            )
-            if is_valid_pose:
-                processed_frame = ui.draw_angles(processed_frame, points_px, left_angle, right_angle)
+                    if prediction > self.monitor.app.fall_threshold:
+                        status_text = "FALL DETECTED"
+                        theme_color = (0, 0, 255)
 
-            self.last_prediction = prediction
-            self.last_status = status_text
-            self.last_frame = processed_frame
-            self.fall_recorder.write_frame(processed_frame)
+                # 3. Render HUD & Angles
+                processed_frame = ui.draw_hud(
+                    frame=processed_frame,
+                    tester_name=self.name,
+                    fps=self.fps,
+                    status_text=status_text,
+                    prediction=prediction,
+                    theme_color=theme_color,
+                    bbox=bbox,
+                    source_label=f"{self.source}" if isinstance(self.source, int) else "RTSP IP STREAM"
+                )
+                if is_valid_pose:
+                    processed_frame = ui.draw_angles(processed_frame, points_px, left_angle, right_angle)
+
+                self.last_prediction = prediction
+                self.last_status = status_text
+                self.last_frame = processed_frame
+                self.fall_recorder.write_frame(processed_frame)
+
+            except Exception as loop_err:
+                import logging
+                logging.error(f"[{self.name}] Unexpected error in worker loop: {loop_err}", exc_info=True)
+                time.sleep(0.01)
 
     def save_fall_clip(self):
         fps_val = self.fps if self.fps > 0 else 30.0
