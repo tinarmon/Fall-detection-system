@@ -196,17 +196,36 @@ def run_inference():
             theme_color = (0, 255, 0)
 
             if is_valid_pose:
-                features = [left_angle / 180.0, right_angle / 180.0]
-                rel_features = estimator.get_relative_features(points_norm)
-                features.extend(rel_features)
+                expected_dim = model.input_shape[-1] if (model is not None and hasattr(model, 'input_shape') and model.input_shape) else 14
+                if expected_dim == 14:
+                    features = [left_angle / 180.0, right_angle / 180.0]
+                    for target in config.TARGET_LANDMARKS:
+                        features.extend([points_norm[target][0], points_norm[target][1]])
+                elif expected_dim == 20:
+                    features = [left_angle / 180.0, right_angle / 180.0]
+                    rel_features = estimator.get_relative_features(points_norm)
+                    features.extend(rel_features)
+                else:
+                    features = [left_angle / 180.0, right_angle / 180.0]
+                    for target in config.TARGET_LANDMARKS:
+                        features.extend([points_norm[target][0], points_norm[target][1]])
+                    if len(features) < expected_dim:
+                        features.extend([0.0] * (expected_dim - len(features)))
+                    elif len(features) > expected_dim:
+                        features = features[:expected_dim]
 
                 sequence_buffer.append(features)
 
                 if len(sequence_buffer) == TIME_STEPS:
-                    input_data = np.array(sequence_buffer).reshape(
-                        1, TIME_STEPS, len(features)
-                    )
-                    prediction = model.predict(input_data, verbose=0)[0][0]
+                    try:
+                        input_data = np.array(sequence_buffer, dtype=np.float32).reshape(
+                            1, TIME_STEPS, expected_dim
+                        )
+                        pred_val = model(input_data, training=False).numpy()[0][0]
+                        prediction = float(pred_val)
+                    except Exception as pred_err:
+                        print(f"Prediction error: {pred_err}")
+                        prediction = 0.0
 
                     predicted_label = 1 if prediction > config.FALL_THRESHOLD else 0
                     row_data = [tester_name, predicted_label] + features
