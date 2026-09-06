@@ -80,6 +80,8 @@ def build():
             [
                 python_exe, "-m", "PyInstaller", "main.py", 
                 "--name=DPDF", "--onedir", "--noconsole", "--clean",
+                "--collect-all=mediapipe",
+                "--copy-metadata=mediapipe",
                 "--add-data=assets;assets", "--icon=assets/icon.ico"
             ],
             check=True,
@@ -174,9 +176,28 @@ def build():
         shutil.copytree(src_assets, dest_assets, dirs_exist_ok=True)
 
     # Copy OpenCV FFmpeg DLL directly to dist/DPDF root for Windows LoadLibrary resolution
-    cv2_dll_src = os.path.join(dist_dir, "DPDF", "_internal", "cv2", "opencv_videoio_ffmpeg4130_64.dll")
-    if os.path.exists(cv2_dll_src):
-        shutil.copy2(cv2_dll_src, os.path.join(dist_dir, "DPDF", "opencv_videoio_ffmpeg4130_64.dll"))
+    import glob
+    for cv2_dll in glob.glob(os.path.join(dist_dir, "DPDF", "_internal", "cv2", "opencv_videoio_ffmpeg*.dll")):
+        print(f"Copying OpenCV FFmpeg DLL to dist/DPDF root: {os.path.basename(cv2_dll)}")
+        shutil.copy2(cv2_dll, os.path.join(dist_dir, "DPDF", os.path.basename(cv2_dll)))
+
+    # Ensure full mediapipe package (with libmediapipe.dll) is bundled into dist/DPDF/_internal/mediapipe
+    try:
+        import mediapipe
+        mp_site_pkg = os.path.dirname(mediapipe.__file__)
+    except Exception:
+        mp_site_pkg = os.path.normpath(os.path.join(os.path.dirname(python_exe), "..", "lib", "site-packages", "mediapipe"))
+
+    mp_dest = os.path.join(dist_dir, "DPDF", "_internal", "mediapipe")
+    if os.path.exists(mp_site_pkg):
+        print(f"Ensuring full mediapipe package with binaries is present in dist/DPDF/_internal/mediapipe...")
+        shutil.copytree(mp_site_pkg, mp_dest, dirs_exist_ok=True)
+
+    mp_dll = os.path.join(mp_dest, "tasks", "c", "libmediapipe.dll")
+    if os.path.exists(mp_dll):
+        print(f"Verified libmediapipe.dll present: {os.path.getsize(mp_dll) / (1024*1024):.2f} MB")
+    else:
+        print("WARNING: libmediapipe.dll not found in mediapipe/tasks/c!")
         
     # Compress dist/DPDF workspace into payload.zip
     zip_path = os.path.join(project_dir, "payload.zip")

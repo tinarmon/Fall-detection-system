@@ -56,7 +56,10 @@ class PoseEstimator:
             
             for idx in self.TARGET_LANDMARKS:
                 lm = landmarks[idx]
-                if lm.visibility > 0.5:
+                vis = getattr(lm, 'visibility', None)
+                if vis is None:
+                    vis = getattr(lm, 'presence', 1.0)
+                if vis is None or vis > 0.5:
                     # 1. พิกัด Pixel (สำหรับวาดจอและแสดงผล HUD)
                     px, py = int(lm.x * w), int(lm.y * h)
                     points_px[idx] = (px, py)

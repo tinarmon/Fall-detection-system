@@ -226,8 +226,13 @@ class CameraStream:
         ui = UIManager()
         estimator = None
         try:
+            import logging
+            logging.info(f"[{self.name}] Initializing PoseEstimator (task_path={config.POSE_TASK_PATH}, exists={os.path.exists(config.POSE_TASK_PATH)})")
             estimator = PoseEstimator()
+            logging.info(f"[{self.name}] PoseEstimator initialized successfully!")
         except Exception as ex:
+            import logging
+            logging.error(f"[{self.name}] Failed to initialize PoseEstimator: {ex}", exc_info=True)
             print(f"[{self.name}] Warning: Failed to initialize PoseEstimator: {ex}")
             
         calculator = AngleCalculator()
@@ -272,11 +277,24 @@ class CameraStream:
             if estimator is not None:
                 try:
                     processed_frame, points_px, points_norm, points_world = estimator.process_frame(frame)
+                    if frame_counter % 60 == 0:
+                        import logging
+                        logging.info(f"[{self.name}] Frame {frame_counter}: landmarks detected={len(points_px)}")
                 except Exception as ex:
+                    import logging
+                    logging.error(f"[{self.name}] Error in process_frame: {ex}", exc_info=True)
                     print(f"[{self.name}] Error in process_frame: {ex}")
                     processed_frame = frame.copy()
                     points_px, points_norm, points_world = {}, {}, {}
             else:
+                if frame_counter % 60 == 0:
+                    import logging
+                    logging.warning(f"[{self.name}] Frame {frame_counter}: estimator is None, attempting re-initialization...")
+                    try:
+                        estimator = PoseEstimator()
+                        logging.info(f"[{self.name}] PoseEstimator successfully re-initialized!")
+                    except Exception as ex:
+                        logging.error(f"[{self.name}] PoseEstimator re-initialization failed: {ex}")
                 processed_frame = frame.copy()
                 points_px, points_norm, points_world = {}, {}, {}
 

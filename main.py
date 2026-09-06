@@ -5,9 +5,37 @@ Refactored and optimized according to UXUI_Design_Principles.md
 
 import os
 import sys
+import logging
 
 # Force OpenCV FFmpeg backend to use TCP transport for all RTSP streams
 os.environ["OPENCV_FFMPEG_RTSP_TRANSPORT"] = "tcp"
+
+# Initialize local diagnostic file log
+_log_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+_log_file = os.path.join(_log_dir, "app_debug.log")
+logging.basicConfig(
+    filename=_log_file,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    filemode="a"
+)
+logging.info("=== DPDF Application Started ===")
+
+# Safe redirect for sys.stdout/sys.stderr when running without console
+class StreamToLogger:
+    def __init__(self, logger_func):
+        self.logger_func = logger_func
+    def write(self, buf):
+        for line in buf.rstrip().splitlines():
+            if line.strip():
+                self.logger_func(line.rstrip())
+    def flush(self):
+        pass
+
+if sys.stdout is None:
+    sys.stdout = StreamToLogger(logging.info)
+if sys.stderr is None:
+    sys.stderr = StreamToLogger(logging.error)
 
 # Catch and mock matplotlib if missing to prevent MediaPipe drawing_utils static import crash
 try:
