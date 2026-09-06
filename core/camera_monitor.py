@@ -10,15 +10,19 @@ import cv2
 import numpy as np
 import tensorflow as tf
 
+# Force OpenCV FFmpeg backend to use TCP transport for RTSP streams
+os.environ["OPENCV_FFMPEG_RTSP_TRANSPORT"] = "tcp"
+
 import config
-from core.pose_estimator import PoseEstimator;
-from core.angle_calculator import AngleCalculator;
-from core.ui_manager import UIManager;
-from core.fall_recorder import FallRecorder;
+from core.pose_estimator import PoseEstimator
+from core.angle_calculator import AngleCalculator
+from core.ui_manager import UIManager
+from core.fall_recorder import FallRecorder
 
 # Global Lock and Shared Model
 model_lock = threading.Lock()
 shared_model = None
+
 
 def send_line_notify(message, token):
     if not token or not token.strip():
@@ -37,12 +41,14 @@ def send_line_notify(message, token):
         print(f"Error sending Line Notify: {e}")
         return False
 
+
 def send_line_notify_async(message, token, callback=None):
     def worker():
         success = send_line_notify(message, token)
         if callback:
             callback(success)
     threading.Thread(target=worker, daemon=True).start()
+
 
 def load_trained_model():
     global shared_model
@@ -57,6 +63,11 @@ def load_trained_model():
 
 
 class CameraStream:
+    """
+    High-reliability Camera Stream Handler.
+    Supports both DirectShow Wired USB Cameras and TCP-based RTSP IP Network Cameras.
+    Includes zero-lag buffer management, telemetry tracking, and auto-reconnection.
+    """
     def __init__(self, monitor, name, source, width=640, height=480):
         self.monitor = monitor
         self.name = name
@@ -65,15 +76,25 @@ class CameraStream:
         self.height = height
         self.cap = None
         self.is_running = False
+        
+        # State tracking
+        self.connection_status = "CONNECTING"  # "CONNECTING", "ONLINE", "RECONNECTING", "OFFLINE"
+        self.status_detail = "Initializing stream connection..."
+        self.is_online = False
+        self.retry_count = 0
+        self.last_frame_time = 0.0
+        
+        # Output telemetry
         self.last_frame = None
         self.fps = 0.0
         self.last_prediction = 0.0
-        self.last_status = "STANDBY"
+        self.last_status = "CONNECTING"
         self.sequence_buffer = deque(maxlen=config.TIME_STEPS)
+        
         self.thread = None
         self.fall_recorder = FallRecorder()
         
-        # Try to resolve numeric index
+        # Resolve numeric source index for USB webcams
         try:
             if str(source).isdigit():
                 self.source = int(source)
@@ -83,17 +104,54 @@ class CameraStream:
     def start(self):
         if not self.is_running:
             self.is_running = True
+            self.connection_status = "CONNECTING"
+            self.status_detail = "Connecting to video source..."
             self.thread = threading.Thread(target=self._run_loop, daemon=True)
             self.thread.start()
 
     def stop(self):
         self.is_running = False
+        self.connection_status = "OFFLINE"
+        self.is_online = False
         if self.thread:
             self.thread.join(timeout=1.0)
             self.thread = None
+        self._release_cap()
+
+    def _release_cap(self):
         if self.cap:
-            self.cap.release()
+            try:
+                self.cap.release()
+            except Exception:
+                pass
             self.cap = None
+
+    def _open_capture(self):
+        """Open OpenCV VideoCapture with optimal backend and timeout settings."""
+        self._release_cap()
+        
+        if isinstance(self.source, int):
+            # Local Wired / USB Camera (DirectShow backend on Windows)
+            backend = cv2.CAP_DSHOW if os.name == 'nt' else 0
+            cap = cv2.VideoCapture(self.source, backend)
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                return cap
+        else:
+            # IP Network Camera (RTSP Stream via FFmpeg backend over TCP)
+            source_str = str(self.source).strip()
+            cap = cv2.VideoCapture(source_str, cv2.CAP_FFMPEG)
+            if hasattr(cv2, 'CAP_PROP_OPEN_TIMEOUT_MSEC'):
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+            if hasattr(cv2, 'CAP_PROP_READ_TIMEOUT_MSEC'):
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+            if hasattr(cv2, 'CAP_PROP_BUFFERSIZE'):
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            return cap
+            
+        return None
 
     def _run_loop(self):
         global shared_model
@@ -102,32 +160,69 @@ class CameraStream:
         calculator = AngleCalculator()
         ui = UIManager()
         
-        # Open video capture
-        if isinstance(self.source, int):
-            self.cap = cv2.VideoCapture(self.source, cv2.CAP_DSHOW if os.name == 'nt' else 0)
-        else:
-            self.cap = cv2.VideoCapture(self.source)
-            
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) # Force OpenCV to keep only 1 latest frame
-        
         frame_counter = 0
         fps_time = time.time()
+        last_reconnect_attempt = 0.0
+        
         while self.is_running:
-            if not self.cap or not self.cap.isOpened():
-                ret, frame = False, None
-            else:
+            # 1. Connection / Reconnection Management
+            if self.cap is None or not self.cap.isOpened():
+                now = time.time()
+                if now - last_reconnect_attempt > 2.0:
+                    last_reconnect_attempt = now
+                    self.retry_count += 1
+                    self.connection_status = "CONNECTING" if self.retry_count <= 1 else "RECONNECTING"
+                    self.status_detail = f"Attempting connection (Attempt #{self.retry_count})..."
+                    self.cap = self._open_capture()
+                    
+                    if not self.cap or not self.cap.isOpened():
+                        self.is_online = False
+                        # Generate high-tech no-signal placeholder frame
+                        self.last_frame = ui.generate_no_signal_frame(
+                            self.width, self.height, self.name, 
+                            f"{self.connection_status} (#{self.retry_count})",
+                            detail=str(self.source)
+                        )
+                        time.sleep(0.5)
+                        continue
+                else:
+                    time.sleep(0.1)
+                    continue
+                    
+            # 2. Frame Read with Zero-Lag Grab
+            try:
                 ret, frame = self.cap.read()
+            except Exception as ex:
+                print(f"[{self.name}] Exception reading frame: {ex}")
+                ret, frame = False, None
                 
-            if not ret or frame is None:
-                time.sleep(0.01)
+            # Handle frame drop / stream stall
+            if not ret or frame is None or frame.size == 0:
+                self.is_online = False
+                now = time.time()
+                if now - self.last_frame_time > 3.0:
+                    # Stream timed out -> trigger reconnection
+                    self.connection_status = "RECONNECTING"
+                    self.status_detail = "Frame reception timed out. Reconnecting..."
+                    self._release_cap()
+                    self.last_frame = ui.generate_no_signal_frame(
+                        self.width, self.height, self.name, "NO SIGNAL / RECONNECTING...",
+                        detail=str(self.source)
+                    )
+                time.sleep(0.02)
                 continue
                 
+            # Connection is healthy and online
+            self.last_frame_time = time.time()
+            self.is_online = True
+            self.connection_status = "ONLINE"
+            self.retry_count = 0
+            
             curr_time = time.time()
             self.fps = 1.0 / (curr_time - fps_time) if (curr_time - fps_time) > 0 else 30.0
             fps_time = curr_time
             
+            # 3. AI Pose Estimation
             processed_frame, points_px, points_norm, points_world = estimator.process_frame(frame)
             if processed_frame is None or processed_frame.size == 0:
                 processed_frame = frame.copy()
@@ -153,6 +248,7 @@ class CameraStream:
             status_text = "NORMAL"
             theme_color = (0, 255, 0)
             
+            # 4. Fall Prediction Model Inference
             if is_valid_pose:
                 features = [left_angle / 180.0, right_angle / 180.0]
                 rel_features = estimator.get_relative_features(points_norm)
@@ -176,6 +272,7 @@ class CameraStream:
                     status_text = "FALL DETECTED"
                     theme_color = (0, 0, 255)
                             
+            # 5. Render HUD & Angles
             processed_frame = ui.draw_hud(
                 frame=processed_frame,
                 tester_name=self.name,
@@ -184,6 +281,7 @@ class CameraStream:
                 prediction=prediction,
                 theme_color=theme_color,
                 bbox=bbox,
+                source_label=f"{self.source}" if isinstance(self.source, int) else "RTSP IP STREAM"
             )
             if is_valid_pose:
                 processed_frame = ui.draw_angles(processed_frame, points_px, left_angle, right_angle)
@@ -193,14 +291,11 @@ class CameraStream:
             self.last_frame = processed_frame
             self.fall_recorder.write_frame(processed_frame)
             
-        if self.cap:
-            self.cap.release()
-            self.cap = None
+        self._release_cap()
 
     def save_fall_clip(self):
         fps_val = self.fps if self.fps > 0 else 30.0
         return self.fall_recorder.save_recording(self.name, self.width, self.height, fps=fps_val)
-
 
 
 class CameraMonitor:
@@ -210,18 +305,57 @@ class CameraMonitor:
         load_trained_model()
 
     @staticmethod
-    def detect_available_cameras():
+    def detect_available_cameras(max_probe=8):
+        """
+        Probe physical connected cameras on Windows/DirectShow.
+        Returns ONLY indices that physically respond to frame capture.
+        """
         available = []
-        # Query camera indices 0-5
-        for idx in range(5):
+        backend = cv2.CAP_DSHOW if os.name == 'nt' else 0
+        for idx in range(max_probe):
             try:
-                cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW if os.name == 'nt' else 0)
+                cap = cv2.VideoCapture(idx, backend)
                 if cap.isOpened():
-                    available.append(idx)
+                    ret, frame = cap.read()
+                    if ret and frame is not None and frame.size > 0:
+                        available.append(idx)
                     cap.release()
             except Exception:
                 pass
         return available
+
+    @staticmethod
+    def test_stream_connection(source, timeout_sec=4.0):
+        """
+        Quick synchronous probe to test a camera source or RTSP stream.
+        Returns: (success: bool, message: str, resolution: str)
+        """
+        try:
+            if str(source).isdigit():
+                src_val = int(source)
+                backend = cv2.CAP_DSHOW if os.name == 'nt' else 0
+                cap = cv2.VideoCapture(src_val, backend)
+            else:
+                src_val = str(source).strip()
+                cap = cv2.VideoCapture(src_val, cv2.CAP_FFMPEG)
+                if hasattr(cv2, 'CAP_PROP_OPEN_TIMEOUT_MSEC'):
+                    cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, int(timeout_sec * 1000))
+                if hasattr(cv2, 'CAP_PROP_READ_TIMEOUT_MSEC'):
+                    cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, int(timeout_sec * 1000))
+
+            if not cap.isOpened():
+                return False, "ไม่สามารถเปิดสัญญาณกล้องได้ (Connection Failed)", ""
+
+            ret, frame = cap.read()
+            cap.release()
+            
+            if ret and frame is not None and frame.size > 0:
+                h, w = frame.shape[:2]
+                return True, "เชื่อมต่อสัญญาณสำเร็จ (Connected Successfully)", f"{w}x{h}"
+            else:
+                return False, "เชื่อมต่อได้แต่ไม่ได้รับข้อมูลภาพ (No video frames received)", ""
+        except Exception as e:
+            return False, f"เกิดข้อผิดพลาดในการเชื่อมต่อ: {e}", ""
 
     def start_camera_stream(self, name, source):
         if name in self.active_streams:

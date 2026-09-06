@@ -167,7 +167,7 @@ class GlobalSettingsDialog(BaseModalDialog):
 class CameraConfigDialog(BaseModalDialog):
     """Modal dialog for individual camera stream configuration."""
     def __init__(self, parent, app, camera_index):
-        super().__init__(parent, title="Camera Configuration", width=540, height=560, resizable=True, min_width=480, min_height=500)
+        super().__init__(parent, title="Camera Configuration", width=560, height=600, resizable=True, min_width=480, min_height=520)
         self.app = app
         self.idx = camera_index
         self.cfg = self.app.camera_configs[camera_index]
@@ -224,50 +224,59 @@ class CameraConfigDialog(BaseModalDialog):
         )
         btn_src_help.pack(side="left", padx=theme.SPACE_XS)
         
-        # Build dropdown options
-        choices = []
-        for cam_idx in self.app.available_cameras:
-            choices.append(f"Local Camera {cam_idx} (Detected)")
-        for cam_idx in range(4):
-            if cam_idx not in self.app.available_cameras:
-                choices.append(f"Local Camera {cam_idx}")
-        choices.append("IP Network Camera (RTSP Stream)")
-        
-        curr_src = str(self.cfg.get("source", "0"))
-        initial_val = "IP Network Camera (RTSP Stream)"
-        if curr_src.isdigit():
-            val_int = int(curr_src)
-            if val_int in self.app.available_cameras:
-                initial_val = f"Local Camera {val_int} (Detected)"
-            else:
-                initial_val = f"Local Camera {val_int}"
+        self.btn_rescan = SecondaryButton(
+            header_src, text="🔄 สแกนหากล้องต่อตรง (Rescan)", command=self.rescan_cameras,
+            padx=theme.SPACE_SM, pady=2
+        )
+        self.btn_rescan.pack(side="right")
 
-        self.combo_src = ttk.Combobox(card_src, values=choices, state="readonly", font=fonts.BODY)
-        self.combo_src.set(initial_val)
+        self.combo_src = ttk.Combobox(card_src, state="readonly", font=fonts.BODY)
         self.combo_src.pack(fill="x", pady=(0, theme.SPACE_SM))
 
+        header_rtsp = tk.Frame(card_src, bg=theme.SURFACE_CARD)
+        header_rtsp.pack(fill="x", pady=(0, 2))
+
         lbl_rtsp = tk.Label(
-            card_src, text="ลิงก์สตรีม RTSP (สำหรับกล้องวงจรปิด IP Camera):", font=fonts.CAPTION,
+            header_rtsp, text="ลิงก์สตรีม RTSP (สำหรับกล้องวงจรปิด IP Camera):", font=fonts.CAPTION,
             bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
         )
-        lbl_rtsp.pack(anchor="w", pady=(0, 2))
+        lbl_rtsp.pack(side="left")
+
+        rtsp_entry_bar = tk.Frame(card_src, bg=theme.SURFACE_CARD)
+        rtsp_entry_bar.pack(fill="x")
 
         self.ent_rtsp = tk.Entry(
-            card_src, font=fonts.BODY, bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY,
+            rtsp_entry_bar, font=fonts.BODY, bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY,
             insertbackground=theme.TEXT_PRIMARY, bd=1, relief="solid", highlightthickness=0
         )
+        curr_src = str(self.cfg.get("source", "0")).strip()
         if not curr_src.isdigit():
             self.ent_rtsp.insert(0, curr_src)
-        self.ent_rtsp.pack(fill="x", ipady=3)
+        self.ent_rtsp.pack(side="left", fill="x", expand=True, ipady=3)
+
+        self.btn_test_rtsp = SecondaryButton(
+            rtsp_entry_bar, text="🧪 ทดสอบสตรีม", command=self.test_rtsp_stream,
+            padx=theme.SPACE_SM, pady=theme.SPACE_XS
+        )
+        self.btn_test_rtsp.pack(side="right", padx=(theme.SPACE_SM, 0))
+
+        self.lbl_src_status = tk.Label(
+            card_src, text="", font=fonts.CAPTION,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_MUTED
+        )
+        self.lbl_src_status.pack(anchor="w", pady=(theme.SPACE_XS, 0))
 
         def on_src_select(e=None):
             selected = self.combo_src.get()
             if "Local Camera" in selected:
                 self.ent_rtsp.configure(state="disabled", bg=theme.SURFACE_CARD)
+                self.btn_test_rtsp.configure(state="disabled")
             else:
                 self.ent_rtsp.configure(state="normal", bg=theme.SURFACE_ELEVATED)
+                self.btn_test_rtsp.configure(state="normal")
 
         self.combo_src.bind("<<ComboboxSelected>>", on_src_select)
+        self.populate_camera_sources(initial_src=curr_src)
         on_src_select()
 
         # 3. LINE Token Override Field
@@ -304,14 +313,84 @@ class CameraConfigDialog(BaseModalDialog):
 
         self.bind("<Return>", lambda e: self.do_save())
 
+    def populate_camera_sources(self, initial_src="0"):
+        """Populate combobox choices dynamically using verified hardware cameras."""
+        choices = []
+        if self.app.available_cameras:
+            for cam_idx in self.app.available_cameras:
+                choices.append(f"Local Camera {cam_idx} (Detected)")
+        else:
+            choices.append("No Wired Camera Detected")
+            
+        choices.append("IP Network Camera (RTSP Stream)")
+        self.combo_src["values"] = choices
+        
+        initial_val = "IP Network Camera (RTSP Stream)"
+        if str(initial_src).isdigit():
+            val_int = int(initial_src)
+            if val_int in self.app.available_cameras:
+                initial_val = f"Local Camera {val_int} (Detected)"
+            elif self.app.available_cameras:
+                initial_val = f"Local Camera {self.app.available_cameras[0]} (Detected)"
+            else:
+                initial_val = "IP Network Camera (RTSP Stream)"
+        elif "Local Camera" in str(initial_src):
+            initial_val = str(initial_src)
+            
+        self.combo_src.set(initial_val)
+
+    def rescan_cameras(self):
+        self.btn_rescan.configure(state="disabled", text="⏳ กำลังสแกน...")
+        self.lbl_src_status.configure(text="กำลังสแกนหาอุปกรณ์กล้องต่อตรง (USB)...", fg=theme.PRIMARY)
+        
+        def worker():
+            cams = CameraMonitor.detect_available_cameras()
+            def update_ui():
+                self.app.available_cameras = cams
+                self.btn_rescan.configure(state="normal", text="🔄 สแกนหากล้องต่อตรง (Rescan)")
+                curr = self.combo_src.get()
+                self.populate_camera_sources(initial_src=curr)
+                if cams:
+                    self.lbl_src_status.configure(text=f"✅ ตรวจพบกล้องต่อตรง {len(cams)} ตัว: {cams}", fg=theme.SUCCESS)
+                else:
+                    self.lbl_src_status.configure(text="ℹ️ ไม่พบกล้องต่อตรง (เสียบสาย USB แล้วกดสแกนใหม่)", fg=theme.TEXT_MUTED)
+            self.after(0, update_ui)
+            
+        threading.Thread(target=worker, daemon=True).start()
+
+    def test_rtsp_stream(self):
+        url = self.ent_rtsp.get().strip()
+        if not url:
+            messagebox.showwarning("RTSP Stream Test", "กรุณาระบุ URL ของสตรีม RTSP ก่อนทำการทดสอบ", parent=self)
+            return
+            
+        self.btn_test_rtsp.configure(state="disabled", text="⏳ กำลังทดสอบ...")
+        self.lbl_src_status.configure(text="กำลังส่งคำขอเชื่อมต่อ RTSP over TCP...", fg=theme.PRIMARY)
+        
+        def worker():
+            success, msg, res = CameraMonitor.test_stream_connection(url, timeout_sec=4.0)
+            def update_ui():
+                self.btn_test_rtsp.configure(state="normal", text="🧪 ทดสอบสตรีม")
+                if success:
+                    self.lbl_src_status.configure(text=f"✅ เชื่อมต่อสำเร็จ! ความละเอียด: {res}", fg=theme.SUCCESS)
+                    messagebox.showinfo("RTSP Stream Test", f"✅ เชื่อมต่อสตรีม RTSP สำเร็จ!\nความละเอียดสัญญาณ: {res}", parent=self)
+                else:
+                    self.lbl_src_status.configure(text=f"❌ เชื่อมต่อไม่สำเร็จ: {msg}", fg=theme.DANGER)
+                    messagebox.showerror("RTSP Stream Test", f"❌ เชื่อมต่อสตรีมไม่สำเร็จ:\n{msg}\n\nคำแนะนำ:\n1. ตรวจสอบ IP และ Port (เช่น 554)\n2. ตรวจสอบ Username และ Password ของกล้อง\n3. ตรวจสอบว่ากล้องเปิดโหมด ONVIF/RTSP ในแอปผู้ผลิตแล้ว", parent=self)
+            self.after(0, update_ui)
+            
+        threading.Thread(target=worker, daemon=True).start()
+
     def show_source_help(self):
         msg = (
             "วิธีกรอกแหล่งสัญญาณกล้อง (Camera Source):\n\n"
             "1. กล้องเว็บแคมในตัว หรือ USB Webcam:\n"
-            "   - เลือก Local Camera ในดรอปดาวน์ (0, 1, 2...)\n\n"
+            "   - เลือก Local Camera ในดรอปดาวน์ (ระบบจะแสดงเฉพาะกล้องที่ต่ออยู่จริง)\n"
+            "   - หากเพิ่งเสียบสาย ให้กดปุ่ม '🔄 สแกนหากล้องต่อตรง'\n\n"
             "2. กล้องวงจรปิด IP Network Camera (RTSP):\n"
             "   - เลือก 'IP Network Camera' แล้วกรอก URL สตรีม เช่น:\n"
-            "   rtsp://username:password@192.168.1.100:554/stream1"
+            "   rtsp://username:password@192.168.1.100:554/stream1\n"
+            "   - กดปุ่ม '🧪 ทดสอบสตรีม' เพื่อตรวจสอบภาพก่อนบันทึก"
         )
         messagebox.showinfo("คู่มือแหล่งสัญญาณกล้อง", msg, parent=self)
 
@@ -669,6 +748,14 @@ class App(tk.Tk):
                 )
                 lbl_cam_title.pack(side="left")
                 
+                # Real-Time Telemetry Status Badge (No Mocking)
+                lbl_status = tk.Label(
+                    top_bar, text="● CONNECTING...", font=self.fonts.CAPTION,
+                    bg="#2d240f", fg=theme.WARNING, padx=6, pady=1
+                )
+                lbl_status.pack(side="left", padx=(theme.SPACE_SM, 0))
+                cfg["status_badge"] = lbl_status
+                
                 # Right action icons
                 btn_close = IconButton(
                     top_bar, icon="✕", command=lambda idx=i: self.delete_camera(idx),
@@ -710,10 +797,15 @@ class App(tk.Tk):
             return
             
         new_source = "0"
+        assigned = False
         for cam_id in self.available_cameras:
             if not any(str(c.get("source")) == str(cam_id) for c in self.camera_configs):
                 new_source = str(cam_id)
+                assigned = True
                 break
+                
+        if not assigned and not self.available_cameras:
+            new_source = "rtsp://username:password@192.168.1.100:554/stream1"
                 
         self.camera_configs.append({
             "name": f"Camera {new_idx+1}",
@@ -799,6 +891,20 @@ class App(tk.Tk):
             if cam_name in self.active_streams:
                 stream = self.active_streams[cam_name]
                 frame = stream.last_frame
+                
+                # Real-Time Telemetry Status Badge Update (No Mocking)
+                badge = cfg.get("status_badge")
+                if badge and badge.winfo_exists():
+                    if not stream.is_running:
+                        badge.configure(text="● OFFLINE", fg=theme.DANGER, bg="#2d0f0f")
+                    elif stream.last_status == "FALL DETECTED":
+                        badge.configure(text=f"🚨 FALL RISK ({int(stream.last_prediction * 100)}%)", fg="#ffffff", bg=theme.DANGER)
+                    elif stream.connection_status == "ONLINE":
+                        badge.configure(text=f"● ONLINE ({int(stream.fps)} FPS)", fg=theme.SUCCESS, bg="#0f2d1e")
+                    elif stream.connection_status == "RECONNECTING":
+                        badge.configure(text=f"● RECONNECTING (#{stream.retry_count})", fg="#ff8c00", bg="#2d1a0f")
+                    else:  # CONNECTING
+                        badge.configure(text="● CONNECTING...", fg=theme.WARNING, bg="#2d240f")
                 
                 if frame is not None and "label_widget" in cfg and cfg["label_widget"].winfo_exists():
                     # Calculate dimensions from container frame
