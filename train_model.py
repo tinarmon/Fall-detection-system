@@ -1,0 +1,217 @@
+import pandas as pd
+import numpy as np
+import tensorflow as tf
+import config
+from sklearn.model_selection import train_test_split
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import GRU, Dense, Dropout
+import os
+import sys
+import glob
+
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+except AttributeError:
+    pass
+
+TIME_STEPS = config.TIME_STEPS
+EPOCHS = config.EPOCHS
+BATCH_SIZE = config.BATCH_SIZE
+
+def load_and_preprocess_data():
+    # เลือกใช้โฟลเดอร์ตามการตั้งค่า Clean หรือ Raw
+    if config.USE_CLEAN_DATA and os.path.exists(config.CLEAN_DATA_DIR):
+        raw_dir = config.CLEAN_DATA_DIR
+        data_type_str = "สะอาด (Cleaned Data)"
+    else:
+        raw_dir = config.RAW_DATA_DIR
+        data_type_str = "ดิบ (Raw Data)"
+
+    if not os.path.exists(raw_dir):
+        print(f"[ERROR] ไม่พบไดเรกทอรีเก็บข้อมูล: '{raw_dir}'")
+        return None, None
+
+    csv_files = glob.glob(os.path.join(raw_dir, "session_*.csv"))
+    if not csv_files:
+        print(f"[WARNING] ไม่พบไฟล์ข้อมูลเซสชัน (.csv) ใน '{raw_dir}'")
+        return None, None
+
+    print(f"พบไฟล์ข้อมูล {data_type_str} ทั้งหมด {len(csv_files)} ไฟล์ กำลังโหลดและรวมข้อมูลเพื่อใช้ฝึกสอน...")
+
+    dataframes = []
+    for f in csv_files:
+        try:
+            temp_df = pd.read_csv(f)
+            if not temp_df.empty:
+                dataframes.append(temp_df)
+        except Exception as e:
+            print(f"[WARNING] ไม่สามารถอ่านไฟล์ '{f}' ได้: {e}")
+
+    if not dataframes:
+        return None, None
+
+    df = pd.concat(dataframes, ignore_index=True)
+    print(f"โหลดข้อมูลและรวมไฟล์สำเร็จ! จำนวนข้อมูลรวมทั้งหมด: {len(df)} แถว")
+
+    if 'label' not in df.columns:
+        print("[ERROR] โครงสร้างข้อมูลไม่ถูกต้อง (ไม่พบคอลัมน์ 'label')")
+        return None, None
+
+    metadata_cols = ['timestamp', 'subject_id', 'input_source']
+    df_features = df.drop(columns=[col for col in metadata_cols if col in df.columns])
+
+    X = df_features.drop("label", axis=1).values
+    y = df_features["label"].values
+
+    return X, y
+
+def create_sequences(X, y, time_steps):
+    """
+    แปลงข้อมูลรายเฟรม ให้เป็นข้อมูลแบบลำดับเวลา (Sequence) สำหรับโมเดล GRU
+    """
+    Xs, ys = [], []
+    for i in range(len(X) - time_steps):
+        Xs.append(X[i : (i + time_steps)])
+        ys.append(y[i + time_steps])
+    return np.array(Xs), np.array(ys)
+
+def run_training(epochs=None, test_size=None, non_interactive=False):
+    print("=" * 50)
+    print("[TRAINING] เริ่มต้นการฝึกสอนโมเดล AI (Model Training Mode)")
+    print("=" * 50)
+
+    if epochs is None and not non_interactive:
+        print("\n💡 ข้อมูลเกี่ยวกับการกำหนดรอบฝึกสอน (Training Epochs):")
+        print("  - 1 Epoch = การที่โมเดลได้เรียนรู้ข้อมูลฝึกสอนครบถ้วนทุกชุดเป็นจำนวน 1 รอบ")
+        print("  - [รอบน้อยเกินไป (เช่น < 15 รอบ)]:")
+        print("    * ข้อดี: ฝึกสอนเร็ว ประหยัดเวลา")
+        print("    * ข้อเสีย: โมเดลอาจจะยังเรียนรู้แพทเทิร์นไม่เพียงพอ (Underfitting) ความแม่นยำต่ำ")
+        print("  - [รอบมากเกินไป (เช่น > 50 รอบ)]:")
+        print("    * ข้อดี: โมเดลมีโอกาสปรับตัวเข้ากับข้อมูลได้ดียิ่งขึ้น ความแม่นยำสูงขึ้น")
+        print("    * ข้อเสีย: ใช้เวลาประมวลผลนานขึ้น และอาจทำให้โมเดลจดจำข้อมูลเฉพาะชุดฝึกสอนมากเกินไป")
+        print("      จนไม่สามารถทำนายข้อมูลชุดใหม่ได้ถูกต้อง (Overfitting)")
+        print(f"  - ค่าเริ่มต้นปัจจุบันในระบบ: {config.EPOCHS} รอบ")
+        print("=" * 50)
+
+        while True:
+            epochs_input = input(f"ระบุจำนวนรอบฝึกสอน (Epochs) ที่ต้องการ (10-200, ปล่อยว่างเพื่อใช้ค่าเริ่มต้น {config.EPOCHS}): ").strip()
+            if epochs_input == "":
+                epochs = config.EPOCHS
+                break
+            try:
+                epochs = int(epochs_input)
+                if 10 <= epochs <= 200:
+                    break
+                print("กรุณากรอกตัวเลขระหว่าง 10 ถึง 200 รอบ")
+            except ValueError:
+                print("กรุณากรอกเฉพาะตัวเลขจำนวนเต็มเท่านั้น")
+    elif epochs is None:
+        epochs = config.EPOCHS
+
+    print(f"-> กำหนดจำนวนรอบฝึกสอน (Epochs) = {epochs} รอบ\n")
+
+    if test_size is None and not non_interactive:
+        print("💡 ข้อมูลเกี่ยวกับการแบ่งชุดข้อมูล (Dataset Split Ratio):")
+        print("  - ข้อมูลจะถูกแบ่งเป็น 2 ชุดคือ: ชุดฝึกสอน (Train Set) และ ชุดทดสอบ (Test Set)")
+        print("  - [สัดส่วนทดสอบต่ำ (เช่น 0.1 หรือ 10%)]:")
+        print("    * ข้อดี: มีข้อมูลป้อนสอนโมเดลเยอะขึ้น เหมาะสำหรับกรณีข้อมูลรวมมีน้อย")
+        print("    * ข้อเสีย: การวัดผลความแม่นยำอาจมีความผันผวนสูงและยากในการตรวจจับ Overfitting")
+        print("  - [สัดส่วนทดสอบสูง (เช่น 0.3 หรือ 30%)]:")
+        print("    * ข้อดี: การวัดผลตัวชี้วัดความแม่นยำมีความน่าเชื่อถือและเสถียรมากยิ่งขึ้น")
+        print("    * ข้อเสีย: เหลือปริมาณข้อมูลป้อนสอนโมเดลน้อยลง")
+        print("  - สัดส่วนมาตรฐานแนะนำคือ 0.2 (20% สำหรับใช้ทดสอบ, 80% สำหรับใช้สอน)")
+        print("=" * 50)
+
+        while True:
+            test_size_input = input("ระบุอัตราส่วนทดสอบ (Test Size) ที่ต้องการ (0.1 - 0.4, ปล่อยว่างเพื่อใช้ 0.2): ").strip()
+            if test_size_input == "":
+                test_size = 0.2
+                break
+            try:
+                test_size = float(test_size_input)
+                if 0.1 <= test_size <= 0.4:
+                    break
+                print("กรุณากรอกตัวเลขทศนิยมระหว่าง 0.1 ถึง 0.4")
+            except ValueError:
+                print("กรุณากรอกเฉพาะตัวเลขทศนิยมเท่านั้น")
+    elif test_size is None:
+        test_size = 0.2
+
+    print(f"-> กำหนดสัดส่วนชุดทดสอบ (Test Size) = {test_size * 100:.0f}%\n")
+
+    X_raw, y_raw = load_and_preprocess_data()
+    if X_raw is None or y_raw is None:
+        print("[ERROR] ไม่พบข้อมูลสำหรับฝึกสอน กรุณาสะสมข้อมูลก่อนเริ่มฝึกสอนโมเดล")
+        if not non_interactive:
+            input("กด Enter เพื่อกลับสู่เมนูหลัก...")
+        return
+        return
+
+    if len(X_raw) <= TIME_STEPS:
+        print(f"[ERROR] จำนวนข้อมูลดิบ ({len(X_raw)} เฟรม) มีไม่เพียงพอสำหรับสร้าง sequence ขนาด {TIME_STEPS} เฟรม")
+        input("กด Enter เพื่อกลับสู่เมนูหลัก...")
+        return
+
+    X_seq, y_seq = create_sequences(X_raw, y_raw, TIME_STEPS)
+    print(f"จัดกลุ่มเป็น Sequence ละ {TIME_STEPS} เฟรม ได้ทั้งหมด: {len(X_seq)} ชุด")
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_seq, y_seq, test_size=test_size, random_state=42, shuffle=False
+    )
+
+    print("\n--- กำลังสร้างโมเดล GRU ---")
+    model = Sequential(
+        [
+            GRU(64, return_sequences=True, input_shape=(TIME_STEPS, X_train.shape[2])),
+            Dropout(0.2),
+            GRU(32),
+            Dropout(0.2),
+            Dense(16, activation="relu"),
+            Dense(1, activation="sigmoid"),
+        ]
+    )
+
+    model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
+    model.summary()
+
+    print("\n--- เริ่มฝึกสอน (Training) ---")
+    try:
+        model.fit(
+            X_train,
+            y_train,
+            epochs=epochs,
+            batch_size=BATCH_SIZE,
+            validation_data=(X_test, y_test),
+        )
+    except Exception as e:
+        print(f"[ERROR] เกิดข้อผิดพลาดขณะเทรนโมเดล: {e}")
+        input("กด Enter เพื่อกลับสู่เมนูหลัก...")
+        return
+
+    print("\n--- ประเมินผลกับชุดข้อมูลทดสอบ (Test Set) ---")
+    try:
+        loss, accuracy = model.evaluate(X_test, y_test)
+        print(f"ความแม่นยำของ AI (Test Accuracy): {accuracy * 100:.2f}%\n")
+    except Exception as e:
+        print(f"[WARNING] ไม่สามารถประเมินโมเดลได้: {e}")
+
+    os.makedirs(config.ASSETS_DIR, exist_ok=True)
+    model_filename = config.MODEL_PATH
+    try:
+        model.save(model_filename)
+        print(f"[OK] บันทึกโมเดลสำเร็จ! ไฟล์สมอง AI ชื่อ: '{model_filename}'")
+    except Exception as e:
+        print(f"[ERROR] ไม่สามารถบันทึกไฟล์โมเดลได้: {e}")
+
+    if not non_interactive:
+        input("\nกด Enter เพื่อกลับสู่เมนูหลัก...")
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Train 3D GRU Pre-Fall Detection Model")
+    parser.add_argument("--epochs", type=int, default=None, help=f"Number of training epochs (default: {config.EPOCHS})")
+    parser.add_argument("--test-size", type=float, default=None, help="Test set split ratio (default: 0.2)")
+    parser.add_argument("--non-interactive", action="store_true", help="Run training without prompt")
+    args = parser.parse_args()
+    run_training(epochs=args.epochs, test_size=args.test_size, non_interactive=args.non_interactive)
