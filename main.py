@@ -62,7 +62,10 @@ import numpy as np
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import config
 import theme
-from core.camera_monitor import CameraMonitor, send_line_notify_async
+from core.camera_monitor import (
+    CameraMonitor, send_line_push_async, send_line_notify_async,
+    create_fall_alert_flex, create_fall_evidence_montage, send_line_fall_alert_async
+)
 from ui_components import (
     AppFonts,
     PrimaryButton,
@@ -318,18 +321,18 @@ class CameraConfigDialog(BaseModalDialog):
         self.populate_camera_sources(initial_src=curr_src)
         on_src_select()
 
-        # 3. LINE Token Override Field
+        # 3. LINE User/Group ID Override Field
         card_token = CardFrame(content)
         card_token.pack(fill="x", pady=(0, theme.SPACE_SM))
         
         lbl_tk = tk.Label(
-            card_token, text="LINE Notify Token เฉพาะกล้องนี้ (ไม่จำเป็นต้องระบุ):", font=fonts.BODY_BOLD,
+            card_token, text="LINE User / Group ID เฉพาะกล้องนี้ (ไม่จำเป็นต้องระบุ):", font=fonts.BODY_BOLD,
             bg=theme.SURFACE_CARD, fg=theme.TEXT_PRIMARY
         )
         lbl_tk.pack(anchor="w")
         
         lbl_tk_sub = tk.Label(
-            card_token, text="หากระบุจะส่งแจ้งเตือนแยกกลุ่มไลน์ตามจุด แทน Token หลักของระบบ", font=fonts.CAPTION,
+            card_token, text="หากระบุจะส่งแจ้งเตือนไปยังผู้รับนี้โดยเฉพาะ แทนรหัสผู้รับหลักของระบบ", font=fonts.CAPTION,
             bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
         )
         lbl_tk_sub.pack(anchor="w", pady=(0, theme.SPACE_XS))
@@ -341,7 +344,8 @@ class CameraConfigDialog(BaseModalDialog):
             tk_entry_bar, font=fonts.BODY, bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY,
             insertbackground=theme.TEXT_PRIMARY, bd=1, relief="solid", highlightthickness=0
         )
-        self.ent_token.insert(0, self.cfg.get("line_token", ""))
+        current_cam_uid = self.cfg.get("line_user_id", self.cfg.get("line_token", ""))
+        self.ent_token.insert(0, current_cam_uid)
         self.ent_token.pack(side="left", fill="x", expand=True, ipady=3)
         
         btn_test = SecondaryButton(
@@ -475,20 +479,27 @@ class CameraConfigDialog(BaseModalDialog):
         messagebox.showinfo("คู่มือแหล่งสัญญาณกล้อง", msg, parent=self)
 
     def test_line(self):
-        token = self.ent_token.get().strip()
+        user_id = self.ent_token.get().strip()
+        channel_token = getattr(self.app, "line_channel_access_token", "") or getattr(self.app, "global_line_token", "")
         cam_name = self.ent_name.get().strip() or "Camera"
-        if not token:
-            messagebox.showwarning("Warning", "กรุณาระบุ Token เฉพาะกล้องก่อนทำการทดสอบ", parent=self)
+        
+        if not user_id:
+            messagebox.showwarning("Warning", "กรุณาระบุ LINE User / Group ID เฉพาะกล้องก่อนทำการทดสอบ", parent=self)
+            return
+        if not channel_token:
+            messagebox.showwarning("Warning", "กรุณาระบุ LINE Channel Access Token หลักของระบบที่แถบด้านล่างก่อนทดสอบ", parent=self)
             return
             
         def cb(success):
             if success:
-                self.after(0, lambda: messagebox.showinfo("LINE Notify", f"ส่งแจ้งเตือนทดสอบสำหรับ '{cam_name}' สำเร็จแล้ว!", parent=self))
+                self.after(0, lambda: messagebox.showinfo("LINE Messaging API", f"ส่งแจ้งเตือนทดสอบสำหรับ '{cam_name}' สำเร็จแล้ว!", parent=self))
             else:
-                self.after(0, lambda: messagebox.showerror("LINE Notify", "ส่งแจ้งเตือนล้มเหลว กรุณาตรวจสอบรหัส Token", parent=self))
+                self.after(0, lambda: messagebox.showerror("LINE Messaging API", "ส่งแจ้งเตือนล้มเหลว กรุณาตรวจสอบ User ID หรือ Channel Token", parent=self))
                 
-        msg = f"\n🧪 [DPDF Alert Test]\nทดสอบการเชื่อมต่อกล้อง: {cam_name.upper()}\n⏰ เวลา: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        send_line_notify_async(msg, token, callback=cb)
+        time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        flex = create_fall_alert_flex(f"{cam_name} (Test)", time_str, "test_evidence.mp4")
+        msg = f"\n🧪 [DPDF Alert Test]\nทดสอบการเชื่อมต่อกล้อง: {cam_name.upper()}\n⏰ เวลา: {time_str}"
+        send_line_push_async(channel_token, user_id, message_text=msg, flex_container=flex, callback=cb)
 
     def do_save(self):
         name = self.ent_name.get().strip() or f"Camera {self.idx+1}"
@@ -502,7 +513,7 @@ class CameraConfigDialog(BaseModalDialog):
                 messagebox.showerror("Error", "กรุณาระบุ RTSP URL สำหรับกล้องเน็ตเวิร์ก", parent=self)
                 return
                 
-        token = self.ent_token.get().strip()
+        user_id = self.ent_token.get().strip()
         
         # Stop previous stream
         old_name = self.app.camera_configs[self.idx].get("name", "")
@@ -511,7 +522,8 @@ class CameraConfigDialog(BaseModalDialog):
         # Update config
         self.app.camera_configs[self.idx]["name"] = name
         self.app.camera_configs[self.idx]["source"] = source
-        self.app.camera_configs[self.idx]["line_token"] = token
+        self.app.camera_configs[self.idx]["line_user_id"] = user_id
+        self.app.camera_configs[self.idx]["line_token"] = user_id
         self.app.save_camera_config()
         self.destroy()
         self.app.rebuild_grid_view()
@@ -552,19 +564,22 @@ class HelpDialog(BaseModalDialog):
         lbl_t1 = tk.Label(tab1, text=t1_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
         lbl_t1.pack(fill="both", expand=True)
 
-        # Tab 2: LINE Notify
+        # Tab 2: LINE Messaging API
         tab2 = tk.Frame(notebook, bg=theme.BG_DARK, padx=theme.SPACE_MD, pady=theme.SPACE_MD)
-        notebook.add(tab2, text="💬 LINE Notify")
+        notebook.add(tab2, text="💬 LINE Messaging API")
 
         t2_text = (
-            "ขั้นตอนการออกรหัส LINE Notify Token สำหรับแจ้งเตือนภัย:\n\n"
-            "1. เปิดเว็บเบราว์เซอร์แล้วไปที่: https://notify-bot.line.me\n"
-            "2. ล็อกอินด้วยบัญชี LINE ของท่าน\n"
-            "3. คลิกที่ชื่อบัญชีมุมขวาบน -> เลือก 'My Page (หน้าของฉัน)'\n"
-            "4. เลื่อนลงมาด้านล่างสุด คลิกปุ่ม 'Generate Token (ออก Token)'\n"
-            "5. ตั้งชื่อบอท (เช่น DPDF Alert) และเลือก 'กลุ่มแชต' ที่ต้องการรับแจ้งเตือน\n"
-            "6. คัดลอกรหัส Token ที่ได้รับ นำมาวางในช่อง 'LINE Notify Token' ด้านล่างโปรแกรม\n\n"
-            "⚠️ สำคัญมาก: ต้องกด 'เชิญเพื่อน' นำบอทชื่อ 'LINE Notify' เข้าร่วมกลุ่มแชตนั้นด้วย"
+            "ขั้นตอนการเชื่อมต่อระบบแจ้งเตือน LINE Official Account (Messaging API):\n\n"
+            "1. ขอรหัส Channel Access Token (รหัสบอท):\n"
+            "   - เข้าสู่ระบบ https://developers.line.biz\n"
+            "   - เข้า Channel บอทของคุณ -> ไปที่แท็บ 'Messaging API'\n"
+            "   - เลื่อนลงล่างสุด กด 'Issue' ที่ Channel access token แล้วคัดลอกมาวางในช่อง 'Bot Token'\n\n"
+            "2. ขอรหัส User ID หรือ Group ID (รหัสผู้รับ):\n"
+            "   - สแกน QR Code เพื่อเพิ่มเพื่อนบอท LINE OA ของระบบ\n"
+            "   - เมื่อเพิ่มเพื่อนหรือส่งข้อความหาบอท บอทจะตอบกลับ User ID ของคุณทันที (ขึ้นต้นด้วย U...)\n"
+            "   - หากต้องการส่งเข้ากลุ่มแชต: ดึงบอทเข้ากลุ่ม แล้วพิมพ์ 'id' บอทจะตอบ Group ID (ขึ้นต้นด้วย C...)\n"
+            "   - นำรหัส User ID หรือ Group ID มาวางในช่อง 'User/Group ID' ในโปรแกรม\n\n"
+            "3. กดปุ่ม '💾 บันทึกตั้งค่า' และกด '🧪 ทดสอบส่ง' เพื่อตรวจสอบการเชื่อมต่อ"
         )
         lbl_t2 = tk.Label(tab2, text=t2_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
         lbl_t2.pack(fill="both", expand=True)
@@ -591,7 +606,8 @@ class HelpDialog(BaseModalDialog):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("DPDF 3D - Pre-Fall Detection Dashboard")
+        app_ver = getattr(config, 'APP_VERSION', 'v1.1.0')
+        self.title(f"DPDF 3D - Pre-Fall Detection Dashboard ({app_ver})")
         self.geometry("1240x820")
         self.minsize(960, 640)
         self.configure(bg=theme.BG_DARK)
@@ -609,6 +625,8 @@ class App(tk.Tk):
                 pass
                 
         # App state variables
+        self.line_channel_access_token = ""
+        self.global_line_user_id = ""
         self.global_line_token = ""
         self.last_line_notify_time = {}
         self.fall_threshold = 0.6
@@ -667,7 +685,8 @@ class App(tk.Tk):
         title_group = tk.Frame(brand_frame, bg=theme.BG_DARK)
         title_group.pack(side="left")
         
-        lbl_title = tk.Label(title_group, text="PRE-FALL DETECTION 3D", font=self.fonts.H1, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY)
+        app_ver = getattr(config, 'APP_VERSION', 'v1.1.0')
+        lbl_title = tk.Label(title_group, text=f"PRE-FALL DETECTION 3D  {app_ver}", font=self.fonts.H1, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY)
         lbl_title.pack(anchor="w")
         
         lbl_sub = tk.Label(title_group, text="Real-time AI Biomechanical Risk Monitoring Grid", font=self.fonts.CAPTION, bg=theme.BG_DARK, fg=theme.TEXT_SECONDARY)
@@ -696,6 +715,12 @@ class App(tk.Tk):
         )
         btn_settings.pack(side="left", padx=(0, theme.SPACE_SM))
         
+        btn_records = SecondaryButton(
+            ctrl_frame, text="📁 Fall Clips", command=self.open_recorded_folder,
+            tooltip="Open recorded fall clips folder"
+        )
+        btn_records.pack(side="left", padx=(0, theme.SPACE_SM))
+        
         btn_help = SecondaryButton(
             ctrl_frame, text="❔ Help Guide", command=self.show_main_help,
             tooltip="Open user manual (F1)"
@@ -715,37 +740,41 @@ class App(tk.Tk):
         self.toast.grid(row=2, column=0, sticky="ew", pady=(0, theme.SPACE_XS))
 
         # ==========================================
-        # 4. Bottom LINE Notify Bar (Row 3)
+        # 4. Bottom LINE Messaging API Bar (Row 3)
         # ==========================================
         line_card = CardFrame(self.workspace, padding=theme.SPACE_SM)
         line_card.grid(row=3, column=0, sticky="ew")
         
-        lbl_line = tk.Label(line_card, text="LINE Notify Token หลัก:", font=self.fonts.BODY_BOLD, bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY)
-        lbl_line.pack(side="left", padx=(theme.SPACE_SM, theme.SPACE_SM))
+        lbl_uid = tk.Label(
+            line_card, text="👤 LINE User / Group ID ผู้รับ:", font=self.fonts.BODY_BOLD,
+            bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
+        )
+        lbl_uid.pack(side="left", padx=(theme.SPACE_SM, theme.SPACE_XS))
         
-        self.ent_global_token = tk.Entry(
+        self.ent_user_id = tk.Entry(
             line_card, font=self.fonts.BODY, bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY,
             insertbackground=theme.TEXT_PRIMARY, bd=1, relief="solid", highlightthickness=0
         )
-        self.ent_global_token.insert(0, self.global_line_token)
-        self.ent_global_token.pack(side="left", fill="x", expand=True, padx=theme.SPACE_SM, ipady=3)
+        self.ent_user_id.insert(0, self.global_line_user_id)
+        self.ent_user_id.pack(side="left", fill="x", expand=True, padx=theme.SPACE_SM, ipady=3)
+        self.ent_global_token = self.ent_user_id  # Backward compatibility alias
         
         btn_line_help = IconButton(
             line_card, icon="❔", command=self.show_line_token_help,
             bg_color=theme.SURFACE_CARD, fg_color=theme.PRIMARY, hover_bg=theme.SURFACE_HOVER,
-            tooltip="วิธีขอรหัส LINE Notify Token"
+            tooltip="วิธีขอรับรหัส User ID หรือ Group ID"
         )
         btn_line_help.pack(side="left", padx=(0, theme.SPACE_SM))
         
         btn_test_line = SecondaryButton(
             line_card, text="🧪 ทดสอบส่ง", command=self.test_global_line_notify,
-            padx=theme.SPACE_MD, pady=theme.SPACE_XS, tooltip="ทดสอบการส่งข้อความเข้ากลุ่ม LINE"
+            padx=theme.SPACE_MD, pady=theme.SPACE_XS, tooltip="ทดสอบส่งข้อความแจ้งเตือนและ Flex Alert เข้า LINE"
         )
         btn_test_line.pack(side="left", padx=(0, theme.SPACE_SM))
         
         btn_save_token = PrimaryButton(
-            line_card, text="💾 บันทึก Token", command=self.save_global_token,
-            padx=theme.SPACE_MD, pady=theme.SPACE_XS, tooltip="บันทึก Token หลัก (Ctrl+S)"
+            line_card, text="💾 บันทึก ID", command=self.save_global_token,
+            padx=theme.SPACE_MD, pady=theme.SPACE_XS, tooltip="บันทึกรหัส User ID ผู้รับ (Ctrl+S)"
         )
         btn_save_token.pack(side="left", padx=(0, theme.SPACE_SM))
 
@@ -755,6 +784,14 @@ class App(tk.Tk):
     def open_global_settings(self):
         GlobalSettingsDialog(self, self)
 
+    def open_recorded_folder(self):
+        folder_path = os.path.join(config.BASE_DIR, "recorded_falls")
+        os.makedirs(folder_path, exist_ok=True)
+        try:
+            os.startfile(folder_path)
+        except Exception as e:
+            messagebox.showerror("Error", f"ไม่สามารถเปิดโฟลเดอร์คลิปวิดีโอได้: {e}", parent=self)
+
     def show_main_help(self):
         HelpDialog(self)
 
@@ -762,24 +799,42 @@ class App(tk.Tk):
         HelpDialog(self)
 
     def test_global_line_notify(self):
-        token = self.ent_global_token.get().strip()
+        token = self.line_channel_access_token or getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
+        user_id = self.ent_user_id.get().strip()
+        if not user_id:
+            self.toast.show_alert("กรุณาระบุ LINE User ID หรือ Group ID ก่อนทำการทดสอบ", "warning", auto_hide_sec=3)
+            return
         if not token:
-            self.toast.show_alert("กรุณาระบุ LINE Token ก่อนทำการทดสอบ", "warning", auto_hide_sec=3)
+            self.toast.show_alert("ไม่พบ Channel Token ระบบ กรุณาตรวจสอบการตั้งค่า", "danger", auto_hide_sec=3)
             return
             
         def cb(success):
             if success:
-                self.after(0, lambda: self.toast.show_alert("ส่งข้อความทดสอบเข้ากลุ่มไลน์สำเร็จแล้ว!", "success", auto_hide_sec=4))
+                self.after(0, lambda: self.toast.show_alert("ส่งข้อความทดสอบและภาพหลักฐาน 5 เฟรมเข้า LINE สำเร็จแล้ว!", "success", auto_hide_sec=4))
             else:
-                self.after(0, lambda: self.toast.show_alert("ส่งข้อความทดสอบล้มเหลว กรุณาตรวจสอบรหัส Token", "danger", auto_hide_sec=5))
+                self.after(0, lambda: self.toast.show_alert("ส่งข้อความทดสอบล้มเหลว กรุณาตรวจสอบความถูกต้องของ User ID", "danger", auto_hide_sec=5))
                 
-        msg = f"\n🧪 [DPDF Alert Test]\nการทดสอบการเชื่อมต่อระบบเตือนภัยสำเร็จแล้ว!\n⏰ เวลาทดสอบ: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        send_line_notify_async(msg, token, callback=cb)
+        time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Grab sample frames from active stream if available, otherwise synthetic test frames
+        sample_frames = []
+        for stream in self.active_streams.values():
+            sample_frames = stream.get_evidence_frames()
+            if sample_frames:
+                break
+        if not sample_frames:
+            sample_frames = [np.full((240, 320, 3), (i * 45, 130, 80), dtype=np.uint8) for i in range(5)]
+            
+        montage = create_fall_evidence_montage(sample_frames, "TEST SYSTEM", time_str, 0.88)
+        send_line_fall_alert_async(token, user_id, "TEST SYSTEM", time_str, montage_img=montage, video_filename="test_simulation.mp4", callback=cb)
 
     def save_global_token(self):
-        self.global_line_token = self.ent_global_token.get().strip()
+        self.global_line_user_id = self.ent_user_id.get().strip()
+        if not self.line_channel_access_token:
+            self.line_channel_access_token = getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
+        self.global_line_token = self.line_channel_access_token
         self.save_camera_config()
-        self.toast.show_alert("บันทึกรหัส LINE Token หลักเรียบร้อยแล้ว", "success", auto_hide_sec=3)
+        self.toast.show_alert("บันทึกรหัส LINE User ID เรียบร้อยแล้ว", "success", auto_hide_sec=3)
 
     def rebuild_grid_view(self):
         for widget in self.grid_container.winfo_children():
@@ -928,11 +983,18 @@ class App(tk.Tk):
 
     def save_camera_config(self):
         config_data = {
-            "global_line_token": self.global_line_token,
+            "line_channel_access_token": self.line_channel_access_token,
+            "global_line_user_id": self.global_line_user_id,
+            "global_line_token": self.line_channel_access_token,
             "fall_threshold": self.fall_threshold,
             "line_cooldown": self.line_cooldown,
             "audio_alert_enabled": self.audio_alert_enabled,
-            "cameras": [{"name": c["name"], "source": c["source"], "line_token": c.get("line_token", "")} for c in self.camera_configs]
+            "cameras": [{
+                "name": c["name"],
+                "source": c["source"],
+                "line_user_id": c.get("line_user_id", c.get("line_token", "")),
+                "line_token": c.get("line_user_id", c.get("line_token", ""))
+            } for c in self.camera_configs]
         }
         try:
             with open(self.config_path, "w", encoding="utf-8") as f:
@@ -941,23 +1003,32 @@ class App(tk.Tk):
             print(f"Error saving config: {e}")
 
     def load_camera_config(self):
-        self.global_line_token = ""
+        self.line_channel_access_token = getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
+        self.global_line_user_id = ""
+        self.global_line_token = self.line_channel_access_token
         self.fall_threshold = 0.6
         self.line_cooldown = 60
         self.audio_alert_enabled = True
-        default_cameras = [{"name": "Webcam 3D", "source": "0", "line_token": ""}]
+        default_cameras = [{"name": "Webcam 3D", "source": "0", "line_user_id": "", "line_token": ""}]
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     if isinstance(data, dict):
-                        self.global_line_token = data.get("global_line_token", "")
+                        loaded_token = data.get("line_channel_access_token") or data.get("global_line_token")
+                        self.line_channel_access_token = loaded_token.strip() if loaded_token and loaded_token.strip() else getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
+                        self.global_line_user_id = data.get("global_line_user_id", "")
+                        self.global_line_token = self.line_channel_access_token
                         self.fall_threshold = data.get("fall_threshold", 0.6)
                         self.line_cooldown = data.get("line_cooldown", 60)
                         self.audio_alert_enabled = data.get("audio_alert_enabled", True)
-                        return data.get("cameras", default_cameras)
+                        cameras = data.get("cameras", default_cameras)
+                        for c in cameras:
+                            if "line_user_id" not in c and "line_token" in c:
+                                c["line_user_id"] = c.get("line_token", "")
+                        return cameras
                     elif isinstance(data, list):
-                        return [{"name": c["name"], "source": c["source"], "line_token": ""} for c in data]
+                        return [{"name": c["name"], "source": c["source"], "line_user_id": "", "line_token": ""} for c in data]
             except Exception as e:
                 print(f"Error loading config: {e}")
         return default_cameras
@@ -998,11 +1069,12 @@ class App(tk.Tk):
                         cfg["label_widget"].imgtk = imgtk
                         cfg["label_widget"].configure(image=imgtk)
                         
-                if stream.last_status == "FALL DETECTED":
+                is_fall_detected = (stream.last_status == "FALL DETECTED") or stream.consume_fall_event()
+                if is_fall_detected:
                     any_fall = True
                     fall_cam_name = cam_name
                     
-                    # Trigger Line Notify with Cooldown Check
+                    # Trigger Line Notification with Cooldown Check
                     curr_time = time.time()
                     last_sent = self.last_line_notify_time.get(cam_name, 0.0)
                     if curr_time - last_sent > self.line_cooldown:
@@ -1012,10 +1084,36 @@ class App(tk.Tk):
                         video_path = stream.save_fall_clip()
                         video_filename = os.path.basename(video_path)
                         
-                        token = cfg.get("line_token", "").strip() or self.global_line_token
-                        if token:
-                            msg = f"\n🚨 แจ้งเตือนตรวจพบการล้ม!\n📷 กล้อง: {cam_name.upper()}\n⏰ เวลา: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n📂 บันทึกวิดีโอหลักฐาน: {video_filename}"
-                            send_line_notify_async(msg, token)
+                        time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        
+                        # Generate 5-frame fall evidence montage (frames 2, 4, 6, 8, 10)
+                        evidence_frames = stream.get_evidence_frames()
+                        montage_img = None
+                        if evidence_frames:
+                            montage_img = create_fall_evidence_montage(evidence_frames, cam_name, time_str, stream.last_prediction)
+                            evidence_filename = f"evidence_{cam_name}_{int(curr_time)}.jpg"
+                            evidence_path = os.path.join(config.BASE_DIR, "recorded_falls", evidence_filename)
+                            try:
+                                cv2.imwrite(evidence_path, montage_img)
+                            except Exception:
+                                pass
+                        
+                        channel_token = getattr(self, "line_channel_access_token", "") or self.global_line_token or getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
+                        target_user = cfg.get("line_user_id", "").strip() or cfg.get("line_token", "").strip() or self.global_line_user_id
+                        
+                        print(f"🚨 [FALL EVENT TRIGGERED] Camera: {cam_name} | User: {target_user} | Video: {video_filename}")
+                        if channel_token and target_user:
+                            send_line_fall_alert_async(
+                                channel_token=channel_token,
+                                destination_id=target_user,
+                                cam_name=cam_name,
+                                time_str=time_str,
+                                montage_img=montage_img,
+                                video_filename=video_filename
+                            )
+                        elif channel_token:
+                            msg = f"\n🚨 แจ้งเตือนตรวจพบการล้ม!\n📷 กล้อง: {cam_name.upper()}\n⏰ เวลา: {time_str}\n📂 บันทึกวิดีโอหลักฐาน: {video_filename}"
+                            send_line_notify_async(msg, channel_token)
                             
         # Update Alert Banner & Audio Alert
         if any_fall:

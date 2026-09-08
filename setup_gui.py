@@ -23,7 +23,7 @@ from ui_components import (
 class InstallerApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("DPDF 3D - System Setup Wizard")
+        self.title("DPDF 3D - System Setup Wizard v1.1.0")
         self.geometry("540x440")
         self.minsize(480, 380)
         self.configure(bg=theme.BG_DARK)
@@ -62,13 +62,13 @@ class InstallerApp(tk.Tk):
         header.pack(fill="x", side="top")
         
         lbl_title = tk.Label(
-            header, text="🛡️ DPDF 3D SYSTEM SETUP WIZARD", 
+            header, text="🛡️ DPDF 3D SYSTEM SETUP WIZARD v1.1.0", 
             font=self.fonts.H2, bg=theme.SURFACE_CARD, fg=theme.PRIMARY
         )
         lbl_title.pack(anchor="w")
         
         lbl_subtitle = tk.Label(
-            header, text="โปรแกรมติดตั้งระบบตรวจจับและแจ้งเตือนก่อนการล้ม (Pre-Fall Detection 3D v2.0)", 
+            header, text="โปรแกรมติดตั้งระบบตรวจจับและแจ้งเตือนก่อนการล้ม (Pre-Fall Detection 3D v1.1.0)", 
             font=self.fonts.CAPTION, bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
         )
         lbl_subtitle.pack(anchor="w", pady=(theme.SPACE_XS, 0))

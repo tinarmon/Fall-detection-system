@@ -43,6 +43,8 @@ EPOCHS = 30                 # Number of training epochs
 BATCH_SIZE = 32             # Training batch size
 FALL_THRESHOLD = 0.6        # Prediction probability threshold to trigger a "Fall" alert
 LINE_COOLDOWN_SECONDS = 60  # Time in seconds between sending notifications per camera
+APP_VERSION = "v1.1.0"
+DEFAULT_LINE_CHANNEL_TOKEN = "dk9jyRVq40y3r88uZbiG98tINzh6uBrXZ64QEOtcABhXm3rcDLoBIPi4D6nw6ox6bEVdPdTl7htO8MfI3FERTGF8WMnSnQRhUzSzfOmk5AnTIgp4FFBXSJNhX8SuJYVFDTJJcLJxapSFsuMkQ4ER8AdB04t89/1O/w1cDnyilFU="
 
 # ==========================================
 # 🧍 MEDIAPIPE POSE ESTIMATION SETTINGS

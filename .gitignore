@@ -9,3 +9,4 @@ __pycache__/
 payload.zip
 .agents/
 recorded_falls/
+app_debug.log
