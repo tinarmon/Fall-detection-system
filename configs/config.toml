@@ -1,0 +1,46 @@
+# Fall Detection System Configuration
+
+[app]
+version = "1.2.0"
+window_name = "Fall Detection System"
+window_width = 1280
+window_height = 720
+line_cooldown_seconds = 60
+
+[camera]
+default_index = 0
+width = 640
+height = 480
+
+[model]
+time_steps = 10
+epochs = 30
+batch_size = 32
+fall_threshold = 0.6
+model_filename = "fall_model.keras"
+pose_task_filename = "pose_landmarker_full.task"
+
+[pose]
+# Target landmarks: 11 (L Shoulder), 12 (R Shoulder), 23 (L Hip), 24 (R Hip), 25 (L Knee), 26 (R Knee)
+target_landmarks = [11, 12, 23, 24, 25, 26]
+connections = [
+    [11, 12], [11, 23], [12, 24],
+    [23, 24], [23, 25], [24, 26]
+]
+min_detection_confidence = 0.5
+min_presence_confidence = 0.5
+min_tracking_confidence = 0.5
+
+[preprocessing]
+jump_threshold = 0.15
+outlier_distance_threshold = 0.20
+min_outlier_run = 3
+
+[augmentation]
+jitter_sigma = 0.005
+translation_range = 0.05
+scale_range = 0.05
+
+[notifications]
+line_channel_token = "dk9jyRVq40y3r88uZbiG98tINzh6uBrXZ64QEOtcABhXm3rcDLoBIPi4D6nw6ox6bEVdPdTl7htO8MfI3FERTGF8WMnSnQRhUzSzfOmk5AnTIgp4FFBXSJNhX8SuJYVFDTJJcLJxapSFsuMkQ4ER8AdB04t89/1O/w1cDnyilFU="
+

@@ -6,7 +6,14 @@ echo ====================================================
 echo  Starting DPDF 3D Client GUI (Development Mode)
 echo ====================================================
 
-REM 1. Check local venv
+REM 1. Check local uv .venv
+if exist ".\.venv\Scripts\python.exe" (
+    echo Using uv .venv Python...
+    ".\.venv\Scripts\python.exe" main.py
+    goto end
+)
+
+REM 2. Check local venv
 if exist ".\venv\Scripts\python.exe" (
     echo Using local venv Python...
     ".\venv\Scripts\python.exe" main.py

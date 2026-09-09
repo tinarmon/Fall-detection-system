@@ -10,3 +10,6 @@ payload.zip
 .agents/
 recorded_falls/
 app_debug.log
+.venv/
+.pytest_cache/
+.ruff_cache/

@@ -606,7 +606,7 @@ class HelpDialog(BaseModalDialog):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        app_ver = getattr(config, 'APP_VERSION', 'v1.1.0')
+        app_ver = getattr(config, 'APP_VERSION', 'v1.2.0')
         self.title(f"DPDF 3D - Pre-Fall Detection Dashboard ({app_ver})")
         self.geometry("1240x820")
         self.minsize(960, 640)
@@ -685,7 +685,7 @@ class App(tk.Tk):
         title_group = tk.Frame(brand_frame, bg=theme.BG_DARK)
         title_group.pack(side="left")
         
-        app_ver = getattr(config, 'APP_VERSION', 'v1.1.0')
+        app_ver = getattr(config, 'APP_VERSION', 'v1.2.0')
         lbl_title = tk.Label(title_group, text=f"PRE-FALL DETECTION 3D  {app_ver}", font=self.fonts.H1, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY)
         lbl_title.pack(anchor="w")
         
@@ -843,24 +843,32 @@ class App(tk.Tk):
         num_cameras = len(self.camera_configs)
         self.lbl_cam_count.configure(text=f"● {num_cameras} Active Stream{'s' if num_cameras != 1 else ''}")
         
+        # Reset all existing column/row weights to prevent phantom space
+        for r in range(4):
+            self.grid_container.rowconfigure(r, weight=0)
+        for c in range(4):
+            self.grid_container.columnconfigure(c, weight=0)
+
         # Grid layout determination
         if num_cameras <= 1:
             rows, cols = 1, 1
+            total_slots = 1
         elif num_cameras == 2:
             rows, cols = 1, 2
+            total_slots = 2
         else:
             rows, cols = 2, 2
-            
+            total_slots = 4
+
         for r in range(rows):
             self.grid_container.rowconfigure(r, weight=1)
         for c in range(cols):
             self.grid_container.columnconfigure(c, weight=1)
-            
-        total_slots = 4 if num_cameras >= 2 else (1 if num_cameras == 0 else min(2, num_cameras + 1))
-        
+
         for i in range(total_slots):
             r = i // cols
             c = i % cols
+
             
             if i < num_cameras:
                 cfg = self.camera_configs[i]

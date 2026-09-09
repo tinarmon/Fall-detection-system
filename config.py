@@ -1,94 +1,57 @@
+"""Backwards-compatibility configuration facade delegating to src.fall_detection.config."""
+
+from __future__ import annotations
+
 import os
-import sys
+from src.fall_detection.config import GLOBAL_CONFIG
 
-# Automatically define directories relative to execution environment
-if getattr(sys, 'frozen', False):
-    # Running as compiled .exe (PyInstaller onedir/onefile)
-    EXE_DIR = os.path.dirname(sys.executable)
-    MEIPASS_DIR = getattr(sys, '_MEIPASS', os.path.join(EXE_DIR, '_internal'))
-    
-    # Locate assets: search MEIPASS (_internal), then EXE directory
-    if os.path.isdir(os.path.join(MEIPASS_DIR, "assets")):
-        ASSETS_DIR = os.path.join(MEIPASS_DIR, "assets")
-    elif os.path.isdir(os.path.join(EXE_DIR, "assets")):
-        ASSETS_DIR = os.path.join(EXE_DIR, "assets")
-    elif os.path.isdir(os.path.join(EXE_DIR, "_internal", "assets")):
-        ASSETS_DIR = os.path.join(EXE_DIR, "_internal", "assets")
-    else:
-        ASSETS_DIR = os.path.join(MEIPASS_DIR, "assets")
-        
-    BASE_DIR = EXE_DIR
-else:
-    # Running in Python development
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    ASSETS_DIR = os.path.join(BASE_DIR, "assets")
-    EXE_DIR = BASE_DIR
+BASE_DIR = str(GLOBAL_CONFIG.base_dir)
+ASSETS_DIR = str(GLOBAL_CONFIG.assets_dir)
+EXE_DIR = BASE_DIR
+DATA_DIR = str(GLOBAL_CONFIG.data_dir)
+RAW_DATA_DIR = str(GLOBAL_CONFIG.raw_data_dir)
+CLEAN_DATA_DIR = str(GLOBAL_CONFIG.clean_data_dir)
+USE_CLEAN_DATA = GLOBAL_CONFIG.use_clean_data
 
-DATA_DIR = os.path.join(BASE_DIR, "data")
-RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
-CLEAN_DATA_DIR = os.path.join(DATA_DIR, "clean")
-USE_CLEAN_DATA = True
+MODEL_PATH = str(GLOBAL_CONFIG.model_path)
+POSE_TASK_PATH = str(GLOBAL_CONFIG.pose_task_path)
+DATASET_PATH = str(GLOBAL_CONFIG.dataset_path)
+LIVE_DATA_PATH = str(GLOBAL_CONFIG.live_data_path)
 
-# Files
-MODEL_PATH = os.path.join(ASSETS_DIR, "fall_model.keras")
-POSE_TASK_PATH = os.path.join(ASSETS_DIR, "pose_landmarker_full.task")
-DATASET_PATH = os.path.join(DATA_DIR, "fall_dataset.csv")
-LIVE_DATA_PATH = os.path.join(DATA_DIR, "live_collected_data.csv")
+TIME_STEPS = GLOBAL_CONFIG.time_steps
+EPOCHS = GLOBAL_CONFIG.epochs
+BATCH_SIZE = GLOBAL_CONFIG.batch_size
+FALL_THRESHOLD = GLOBAL_CONFIG.fall_threshold
+LINE_COOLDOWN_SECONDS = GLOBAL_CONFIG.line_cooldown_seconds
+APP_VERSION = GLOBAL_CONFIG.app_version
+DEFAULT_LINE_CHANNEL_TOKEN = GLOBAL_CONFIG.line_channel_token
 
-# ==========================================
-# 🧠 MODEL & TRAINING HYPERPARAMETERS
-# ==========================================
-TIME_STEPS = 10             # Number of historical frames the AI looks at
-EPOCHS = 30                 # Number of training epochs
-BATCH_SIZE = 32             # Training batch size
-FALL_THRESHOLD = 0.6        # Prediction probability threshold to trigger a "Fall" alert
-LINE_COOLDOWN_SECONDS = 60  # Time in seconds between sending notifications per camera
-APP_VERSION = "v1.1.0"
-DEFAULT_LINE_CHANNEL_TOKEN = "dk9jyRVq40y3r88uZbiG98tINzh6uBrXZ64QEOtcABhXm3rcDLoBIPi4D6nw6ox6bEVdPdTl7htO8MfI3FERTGF8WMnSnQRhUzSzfOmk5AnTIgp4FFBXSJNhX8SuJYVFDTJJcLJxapSFsuMkQ4ER8AdB04t89/1O/w1cDnyilFU="
+TARGET_LANDMARKS = GLOBAL_CONFIG.target_landmarks
+CONNECTIONS = GLOBAL_CONFIG.connections
 
-# ==========================================
-# 🧍 MEDIAPIPE POSE ESTIMATION SETTINGS
-# ==========================================
-# 11: L Shoulder, 12: R Shoulder, 23: L Hip, 24: R Hip, 25: L Knee, 26: R Knee
-TARGET_LANDMARKS = [11, 12, 23, 24, 25, 26]
-CONNECTIONS = [
-    (11, 12), (11, 23), (12, 24),
-    (23, 24), (23, 25), (24, 26)
-]
+MIN_DETECTION_CONFIDENCE = GLOBAL_CONFIG.min_detection_confidence
+MIN_PRESENCE_CONFIDENCE = GLOBAL_CONFIG.min_presence_confidence
+MIN_TRACKING_CONFIDENCE = GLOBAL_CONFIG.min_tracking_confidence
 
-MIN_DETECTION_CONFIDENCE = 0.5
-MIN_PRESENCE_CONFIDENCE = 0.5
-MIN_TRACKING_CONFIDENCE = 0.5
+CAMERA_INDEX = GLOBAL_CONFIG.camera_index
+CAMERA_WIDTH = GLOBAL_CONFIG.camera_width
+CAMERA_HEIGHT = GLOBAL_CONFIG.camera_height
 
-# ==========================================
-# 📷 CAMERA & UI SETTINGS
-# ==========================================
-CAMERA_INDEX = 0
-CAMERA_WIDTH = 640
-CAMERA_HEIGHT = 480
+WINDOW_WIDTH = GLOBAL_CONFIG.window_width
+WINDOW_HEIGHT = GLOBAL_CONFIG.window_height
 
-WINDOW_WIDTH = 1280
-WINDOW_HEIGHT = 720
-
-MAIN_WINDOW_NAME = "Fall Detection System"
+MAIN_WINDOW_NAME = GLOBAL_CONFIG.window_name
 COLLECT_WINDOW_NAME = "Data Collection Mode"
 
-# Colors (BGR Format)
-COLOR_NORMAL = (0, 255, 0)      # Green
-COLOR_WARNING = (0, 165, 255)   # Orange
-COLOR_DANGER = (0, 0, 255)      # Red
-COLOR_TEXT = (255, 255, 255)    # White
+COLOR_NORMAL = (0, 255, 0)
+COLOR_WARNING = (0, 165, 255)
+COLOR_DANGER = (0, 0, 255)
+COLOR_TEXT = (255, 255, 255)
 
-# ==========================================
-# 🧹 PREPROCESSING & DATA CLEANING SETTINGS
-# ==========================================
-JUMP_THRESHOLD = 0.15           # Horizontal centroid jump threshold to detect subject swaps
-OUTLIER_DISTANCE_THRESHOLD = 0.20 # Max horizontal distance from global median centroid
-MIN_OUTLIER_RUN = 3             # Min frames of a swap to clean
+JUMP_THRESHOLD = GLOBAL_CONFIG.jump_threshold
+OUTLIER_DISTANCE_THRESHOLD = GLOBAL_CONFIG.outlier_distance_threshold
+MIN_OUTLIER_RUN = GLOBAL_CONFIG.min_outlier_run
 
-# ==========================================
-# 📊 DATA AUGMENTATION & BALANCING SETTINGS
-# ==========================================
-JITTER_SIGMA = 0.005            # Standard deviation for random Gaussian noise (jitter)
-TRANSLATION_RANGE = 0.05        # Maximum horizontal/vertical offset translation (5% of screen width/height)
-SCALE_RANGE = 0.05              # Maximum scaling factor offset (e.g. scale in [0.95, 1.05])
+JITTER_SIGMA = GLOBAL_CONFIG.jitter_sigma
+TRANSLATION_RANGE = GLOBAL_CONFIG.translation_range
+SCALE_RANGE = GLOBAL_CONFIG.scale_range
