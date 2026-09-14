@@ -876,6 +876,9 @@ class App(tk.Tk):
         if not self.line_channel_access_token:
             self.line_channel_access_token = getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
         self.global_line_token = self.line_channel_access_token
+        if hasattr(self, "fall_controller"):
+            self.fall_controller.default_user_id = self.global_line_user_id
+            self.fall_controller.line_channel_token = self.line_channel_access_token
         self.save_camera_config()
         self.toast.show_alert("บันทึกรหัส LINE User ID เรียบร้อยแล้ว", "success", auto_hide_sec=3)
 
@@ -1144,6 +1147,12 @@ class App(tk.Tk):
                         or self.global_line_token
                         or getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
                     )
+                    current_user_id = (
+                        self.ent_user_id.get().strip()
+                        if hasattr(self, "ent_user_id")
+                        else ""
+                    ) or getattr(self, "global_line_user_id", "")
+                    self.fall_controller.default_user_id = current_user_id
                     self.fall_controller.process_fall_event(cam_name, stream, cfg)
 
         # Update Alert Banner & Audio Alert

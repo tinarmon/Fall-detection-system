@@ -11,7 +11,6 @@ from src.fall_detection.config import AppConfig
 from src.fall_detection.notification import (
     create_fall_evidence_montage,
     send_line_fall_alert_async,
-    send_line_notify_async,
 )
 
 logger = logging.getLogger(__name__)
@@ -20,9 +19,15 @@ logger = logging.getLogger(__name__)
 class FallEventController:
     """Controls fall event dispatch and notification cooldowns."""
 
-    def __init__(self, app_config: AppConfig, line_channel_token: str = ""):
+    def __init__(
+        self,
+        app_config: AppConfig,
+        line_channel_token: str = "",
+        default_user_id: str = "",
+    ):
         self.app_config = app_config
         self.line_channel_token = line_channel_token
+        self.default_user_id = default_user_id
         self.last_line_notify_time: dict[str, float] = {}
         self.last_audio_alert_time: float = 0.0
 
@@ -54,13 +59,20 @@ class FallEventController:
                 except Exception as e:
                     logger.warning("Failed to save evidence image: %s", e)
 
-            target_user = cfg.get("line_user_id", "").strip() or cfg.get("line_token", "").strip()
-            channel_token = self.line_channel_token or self.app_config.line_channel_token
+            target_user = (
+                cfg.get("line_user_id", "").strip()
+                or cfg.get("line_token", "").strip()
+                or self.default_user_id.strip()
+                or getattr(self, "global_line_user_id", "").strip()
+            )
+            channel_token = (
+                self.line_channel_token or self.app_config.line_channel_token
+            ).strip()
 
             logger.info(
                 "🚨 [FALL EVENT TRIGGERED] Camera: %s | User: %s | Video: %s",
                 cam_name,
-                target_user,
+                target_user or "(NO USER ID)",
                 video_filename,
             )
 
@@ -73,9 +85,10 @@ class FallEventController:
                     montage_img=montage_img,
                     video_filename=video_filename,
                 )
-            elif channel_token:
-                msg = f"\n🚨 แจ้งเตือนตรวจพบการล้ม!\n📷 กล้อง: {cam_name.upper()}\n⏰ เวลา: {time_str}\n📂 บันทึกวิดีโอหลักฐาน: {video_filename}"
-                send_line_notify_async(msg, channel_token)
+            elif not target_user:
+                logger.warning(
+                    "⚠️ [FALL EVENT] No LINE User ID or Group ID provided. Alert could not be sent to LINE."
+                )
 
     def should_alert_audio(self, cam_name: str, cooldown: float = 4.0) -> bool:
         """Determines if audio alert should sound based on cooldown."""
