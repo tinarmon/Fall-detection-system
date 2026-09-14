@@ -153,7 +153,7 @@ def main():
             print(f"Upload failed: {e.code} - {err_body}")
             sys.exit(1)
 
-    print(f"\n🎉 Release v1.3.0 is live at: https://github.com/{repo}/releases/tag/{tag}")
+    print(f"\nRelease v1.3.0 is live at: https://github.com/{repo}/releases/tag/{tag}")
 
 
 if __name__ == "__main__":
