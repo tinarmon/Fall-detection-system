@@ -568,21 +568,48 @@ class HelpDialog(BaseModalDialog):
         tab2 = tk.Frame(notebook, bg=theme.BG_DARK, padx=theme.SPACE_MD, pady=theme.SPACE_MD)
         notebook.add(tab2, text="💬 LINE Messaging API")
 
+        tab2_scroll = tk.Frame(tab2, bg=theme.BG_DARK)
+        tab2_scroll.pack(fill="both", expand=True)
+
         t2_text = (
-            "ขั้นตอนการเชื่อมต่อระบบแจ้งเตือน LINE Official Account (Messaging API):\n\n"
-            "1. ขอรหัส Channel Access Token (รหัสบอท):\n"
-            "   - เข้าสู่ระบบ https://developers.line.biz\n"
-            "   - เข้า Channel บอทของคุณ -> ไปที่แท็บ 'Messaging API'\n"
-            "   - เลื่อนลงล่างสุด กด 'Issue' ที่ Channel access token แล้วคัดลอกมาวางในช่อง 'Bot Token'\n\n"
-            "2. ขอรหัส User ID หรือ Group ID (รหัสผู้รับ):\n"
-            "   - สแกน QR Code เพื่อเพิ่มเพื่อนบอท LINE OA ของระบบ\n"
-            "   - เมื่อเพิ่มเพื่อนหรือส่งข้อความหาบอท บอทจะตอบกลับ User ID ของคุณทันที (ขึ้นต้นด้วย U...)\n"
+            "ขั้นตอนรับการแจ้งเตือน LINE (Messaging API):\n\n"
+            "1. เพิ่มเพื่อนบอท LINE OA ของระบบ:\n"
+            "   - สแกน QR Code ด้านล่าง หรือกดลิงก์เพิ่มเพื่อน\n"
+            "   - เมื่อเพิ่มเพื่อนแล้ว ส่งข้อความอะไรก็ได้ บอทจะตอบกลับ User ID ของคุณทันที (ขึ้นต้นด้วย U...)\n"
             "   - หากต้องการส่งเข้ากลุ่มแชต: ดึงบอทเข้ากลุ่ม แล้วพิมพ์ 'id' บอทจะตอบ Group ID (ขึ้นต้นด้วย C...)\n"
             "   - นำรหัส User ID หรือ Group ID มาวางในช่อง 'User/Group ID' ในโปรแกรม\n\n"
-            "3. กดปุ่ม '💾 บันทึกตั้งค่า' และกด '🧪 ทดสอบส่ง' เพื่อตรวจสอบการเชื่อมต่อ"
+            "2. กดปุ่ม '💾 บันทึกตั้งค่า' และกด '🧪 ทดสอบส่ง' เพื่อตรวจสอบการเชื่อมต่อ"
         )
-        lbl_t2 = tk.Label(tab2, text=t2_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
-        lbl_t2.pack(fill="both", expand=True)
+        lbl_t2 = tk.Label(tab2_scroll, text=t2_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
+        lbl_t2.pack(fill="x", anchor="nw")
+
+        # QR Code and Add Friend link
+        qr_frame = tk.Frame(tab2_scroll, bg=theme.BG_DARK)
+        qr_frame.pack(fill="x", pady=(theme.SPACE_SM, theme.SPACE_XS))
+
+        qr_path = os.path.join(config.ASSETS_DIR, "line_qr.png")
+        if os.path.exists(qr_path):
+            try:
+                raw_img = tk.PhotoImage(file=qr_path)
+                # Subsample to ~120px display size
+                img_w = raw_img.width()
+                factor = max(1, img_w // 120)
+                self._qr_img = raw_img.subsample(factor, factor)
+                lbl_qr = tk.Label(qr_frame, image=self._qr_img, bg=theme.BG_DARK, cursor="hand2")
+                lbl_qr.pack(side="left", padx=(0, theme.SPACE_MD))
+            except tk.TclError:
+                pass
+
+        link_frame = tk.Frame(qr_frame, bg=theme.BG_DARK)
+        link_frame.pack(side="left", anchor="w")
+
+        lbl_link_label = tk.Label(link_frame, text="เพิ่มเพื่อนบอท (Add Friend):", font=fonts.CAPTION, bg=theme.BG_DARK, fg=theme.TEXT_SECONDARY)
+        lbl_link_label.pack(anchor="w")
+
+        add_friend_url = "https://lin.ee/tWCZbH9"
+        lbl_link = tk.Label(link_frame, text=add_friend_url, font=fonts.BODY_BOLD, bg=theme.BG_DARK, fg=theme.PRIMARY, cursor="hand2")
+        lbl_link.pack(anchor="w")
+        lbl_link.bind("<Button-1>", lambda e: os.startfile(add_friend_url))
 
         # Tab 3: Shortcuts & Info
         tab3 = tk.Frame(notebook, bg=theme.BG_DARK, padx=theme.SPACE_MD, pady=theme.SPACE_MD)
