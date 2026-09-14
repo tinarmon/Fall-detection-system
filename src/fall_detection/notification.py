@@ -4,17 +4,23 @@ from __future__ import annotations
 
 import json
 import logging
-import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
 
+from src.fall_detection.config import GLOBAL_CONFIG
+
 logger = logging.getLogger(__name__)
+
+# Bounded thread pool executor for background notification tasks
+_notification_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="NotificationWorker")
 
 
 def create_fall_evidence_montage(
@@ -123,7 +129,9 @@ def create_fall_evidence_montage(
     return np.vstack((row1, row2, row3))
 
 
-def upload_evidence_image(jpeg_bytes: bytes) -> str | None:
+def upload_evidence_image(
+    jpeg_bytes: bytes, retries: int = 1, retry_delay: float = 1.0
+) -> str | None:
     """Uploads JPEG evidence bytes to temporary image host with fallback.
 
     Returns:
@@ -147,39 +155,49 @@ def upload_evidence_image(jpeg_bytes: bytes) -> str | None:
         f"--{boundary}--\r\n".encode(),
     ]
     data = b"\r\n".join(parts)
-    req = urllib.request.Request("https://catbox.moe/user/api.php", data=data, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=6) as response:
-            res = response.read().decode().strip()
-            if res.startswith("http"):
-                return res
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as ex:
-        logger.warning(f"Primary evidence upload failed: {ex}")
+    primary_url = getattr(GLOBAL_CONFIG, "upload_primary_url", "https://catbox.moe/user/api.php")
+    req = urllib.request.Request(primary_url, data=data, headers=headers)
 
-    try:
-        parts_fallback = [
-            f"--{boundary}".encode(),
-            b'Content-Disposition: form-data; name="file"; filename="evidence.jpg"',
-            b"Content-Type: image/jpeg\r\n",
-            jpeg_bytes,
-            f"--{boundary}--\r\n".encode(),
-        ]
-        data_fb = b"\r\n".join(parts_fallback)
-        req_fb = urllib.request.Request(
-            "https://tmpfiles.org/api/v1/upload", data=data_fb, headers=headers
-        )
-        with urllib.request.urlopen(req_fb, timeout=6) as response:
-            res_dict = json.loads(response.read().decode())
-            if res_dict.get("status") == "success":
-                url: str = res_dict["data"]["url"]
-                return url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
-    except (
-        urllib.error.URLError,
-        urllib.error.HTTPError,
-        TimeoutError,
-        json.JSONDecodeError,
-    ) as ex:
-        logger.warning(f"Fallback evidence upload failed: {ex}")
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=6) as response:
+                res = response.read().decode().strip()
+                if res.startswith("http"):
+                    return res
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as ex:
+            logger.warning(f"Primary evidence upload attempt {attempt + 1} failed: {ex}")
+            if attempt < retries and retry_delay > 0:
+                time.sleep(retry_delay)
+
+    parts_fallback = [
+        f"--{boundary}".encode(),
+        b'Content-Disposition: form-data; name="file"; filename="evidence.jpg"',
+        b"Content-Type: image/jpeg\r\n",
+        jpeg_bytes,
+        f"--{boundary}--\r\n".encode(),
+    ]
+    data_fb = b"\r\n".join(parts_fallback)
+    fallback_url = getattr(
+        GLOBAL_CONFIG, "upload_fallback_url", "https://tmpfiles.org/api/v1/upload"
+    )
+    req_fb = urllib.request.Request(fallback_url, data=data_fb, headers=headers)
+
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req_fb, timeout=6) as response:
+                res_dict = json.loads(response.read().decode())
+                if res_dict.get("status") == "success":
+                    url: str = res_dict["data"]["url"]
+                    return url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+        except (
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            TimeoutError,
+            json.JSONDecodeError,
+        ) as ex:
+            logger.warning(f"Fallback evidence upload attempt {attempt + 1} failed: {ex}")
+            if attempt < retries and retry_delay > 0:
+                time.sleep(retry_delay)
 
     return None
 
@@ -349,6 +367,8 @@ def send_line_push_message(
     destination_id: str,
     message_text: str | None = None,
     flex_container: dict | None = None,
+    retries: int = 1,
+    retry_delay: float = 1.0,
 ) -> bool:
     """Delivers push notification to LINE user or group."""
     if not channel_token.strip() or not destination_id.strip():
@@ -378,12 +398,16 @@ def send_line_push_message(
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
 
-    try:
-        with urllib.request.urlopen(req, timeout=8) as response:
-            return response.status == 200
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as ex:
-        logger.error(f"Failed to send LINE push message: {ex}")
-        return False
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=8) as response:
+                return response.status == 200
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as ex:
+            logger.error(f"Failed to send LINE push message (attempt {attempt + 1}): {ex}")
+            if attempt < retries and retry_delay > 0:
+                time.sleep(retry_delay)
+
+    return False
 
 
 def send_line_fall_alert_async(
@@ -395,7 +419,7 @@ def send_line_fall_alert_async(
     video_filename: str | None = None,
     callback: Callable[[bool], None] | None = None,
 ) -> None:
-    """Asynchronously uploads evidence montage and sends LINE Flex Alert."""
+    """Asynchronously uploads evidence montage and sends LINE Flex Alert via thread pool."""
 
     def worker():
         image_url = None
@@ -414,7 +438,7 @@ def send_line_fall_alert_async(
         if callback:
             callback(success)
 
-    threading.Thread(target=worker, daemon=True).start()
+    _notification_executor.submit(worker)
 
 
 def send_line_push_async(
@@ -431,7 +455,7 @@ def send_line_push_async(
         if callback:
             callback(success)
 
-    threading.Thread(target=worker, daemon=True).start()
+    _notification_executor.submit(worker)
 
 
 def send_line_notify(message: str, token: str) -> bool:
@@ -460,4 +484,4 @@ def send_line_notify_async(
         if callback:
             callback(success)
 
-    threading.Thread(target=worker, daemon=True).start()
+    _notification_executor.submit(worker)

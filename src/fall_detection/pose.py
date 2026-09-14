@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import cv2
@@ -13,6 +14,25 @@ from mediapipe.tasks.python import vision
 from src.fall_detection.config import GLOBAL_CONFIG
 
 
+def draw_skeleton(
+    frame: np.ndarray,
+    points_px: dict[int, tuple[int, int]],
+    connections: list[tuple[int, int]] | None = None,
+) -> np.ndarray:
+    """Draws detected joints and connecting bone segments onto the given image frame."""
+    if connections is None:
+        connections = GLOBAL_CONFIG.connections
+
+    for px, py in points_px.values():
+        cv2.circle(frame, (px, py), 8, (0, 255, 0), -1)
+
+    for p1, p2 in connections:
+        if p1 in points_px and p2 in points_px:
+            cv2.line(frame, points_px[p1], points_px[p2], (255, 200, 0), 3)
+
+    return frame
+
+
 class PoseEstimator:
     """Detects 3D pose landmarks and extracts normalized torso-relative feature vectors."""
 
@@ -22,6 +42,7 @@ class PoseEstimator:
         min_detection_confidence: float | None = None,
         min_presence_confidence: float | None = None,
         min_tracking_confidence: float | None = None,
+        running_mode: vision.RunningMode = vision.RunningMode.VIDEO,
     ):
         asset_path = str(model_path or GLOBAL_CONFIG.pose_task_path)
         base_options = python.BaseOptions(model_asset_path=asset_path)
@@ -42,9 +63,10 @@ class PoseEstimator:
             else GLOBAL_CONFIG.min_tracking_confidence
         )
 
+        self.running_mode = running_mode
         options = vision.PoseLandmarkerOptions(
             base_options=base_options,
-            running_mode=vision.RunningMode.IMAGE,
+            running_mode=running_mode,
             num_poses=1,
             min_pose_detection_confidence=det_conf,
             min_pose_presence_confidence=pres_conf,
@@ -53,19 +75,22 @@ class PoseEstimator:
         self.detector = vision.PoseLandmarker.create_from_options(options)
         self.target_landmarks = GLOBAL_CONFIG.target_landmarks
         self.connections = GLOBAL_CONFIG.connections
+        self._last_timestamp_ms = 0
 
     def process_frame(
-        self, frame: np.ndarray
+        self, frame: np.ndarray, draw: bool = True, timestamp_ms: int | None = None
     ) -> tuple[
         np.ndarray,
         dict[int, tuple[int, int]],
         dict[int, tuple[float, float, float]],
         dict[int, tuple[float, float, float]],
     ]:
-        """Detects pose landmarks on a single video frame.
+        """Detects pose landmarks on a video frame.
 
         Parameters:
             frame: BGR image array of shape (H, W, 3).
+            draw: Whether to render landmark circles and connection lines on the frame.
+            timestamp_ms: Monotonically increasing frame timestamp in milliseconds for VIDEO mode.
 
         Returns:
             Tuple of:
@@ -75,17 +100,27 @@ class PoseEstimator:
                 - points_world: mapping landmark_index -> (world_x, world_y, world_z) in meters
         """
         h, w = frame.shape[:2]
+        resize_w = GLOBAL_CONFIG.detection_resize_width
 
-        if w > 640:
-            scale = 640.0 / float(w)
+        if w > resize_w:
+            scale = float(resize_w) / float(w)
             small_h = max(180, int(h * scale))
-            detect_frame = cv2.resize(frame, (640, small_h), interpolation=cv2.INTER_LINEAR)
+            detect_frame = cv2.resize(frame, (resize_w, small_h), interpolation=cv2.INTER_LINEAR)
         else:
             detect_frame = frame
 
         image_rgb = cv2.cvtColor(detect_frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_rgb)
-        detection_result = self.detector.detect(mp_image)
+
+        if self.running_mode == vision.RunningMode.VIDEO:
+            if timestamp_ms is None:
+                ts = max(int(time.time() * 1000), self._last_timestamp_ms + 1)
+            else:
+                ts = max(timestamp_ms, self._last_timestamp_ms + 1)
+            self._last_timestamp_ms = ts
+            detection_result = self.detector.detect_for_video(mp_image, ts)
+        else:
+            detection_result = self.detector.detect(mp_image)
 
         points_px: dict[int, tuple[int, int]] = {}
         points_norm: dict[int, tuple[float, float, float]] = {}
@@ -116,13 +151,18 @@ class PoseEstimator:
                     else:
                         points_world[idx] = (float(lm.x), float(lm.y), float(lm.z))
 
-                    cv2.circle(frame, (px, py), 8, (0, 255, 0), -1)
-
-            for p1, p2 in self.connections:
-                if p1 in points_px and p2 in points_px:
-                    cv2.line(frame, points_px[p1], points_px[p2], (255, 200, 0), 3)
+            if draw and points_px:
+                draw_skeleton(frame, points_px, self.connections)
 
         return frame, points_px, points_norm, points_world
+
+    @staticmethod
+    def draw_skeleton(
+        frame: np.ndarray,
+        points_px: dict[int, tuple[int, int]],
+        connections: list[tuple[int, int]] | None = None,
+    ) -> np.ndarray:
+        return draw_skeleton(frame, points_px, connections)
 
     @staticmethod
     def get_relative_features(points_norm: dict[int, tuple[float, float, float]]) -> list[float]:

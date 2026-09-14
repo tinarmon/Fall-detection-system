@@ -17,7 +17,7 @@ from src.fall_detection.ui.components import AppFonts, CardFrame, PrimaryButton,
 class InstallerApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("DPDF 3D - System Setup Wizard v1.2.0")
+        self.title("DPDF 3D - System Setup Wizard v1.3.0")
         self.geometry("540x440")
         self.minsize(480, 380)
         self.configure(bg=theme.BG_DARK)

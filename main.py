@@ -59,9 +59,19 @@ from tkinter import ttk, messagebox
 import cv2
 import numpy as np
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+if os.name == "nt":
+    try:
+        import winsound
+    except ImportError:
+        winsound = None
+else:
+    winsound = None
+
 import config
 import theme
+from src.fall_detection.config import GLOBAL_CONFIG
+from src.fall_detection.controller import FallEventController
+from src.fall_detection.persistence import load_runtime_config, save_runtime_config
 from core.camera_monitor import (
     CameraMonitor, send_line_push_async, send_line_notify_async,
     create_fall_alert_flex, create_fall_evidence_montage, send_line_fall_alert_async
@@ -633,7 +643,7 @@ class HelpDialog(BaseModalDialog):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        app_ver = getattr(config, 'APP_VERSION', 'v1.2.0')
+        app_ver = getattr(config, 'APP_VERSION', 'v1.3.0')
         self.title(f"DPDF 3D - Pre-Fall Detection Dashboard ({app_ver})")
         self.geometry("1240x820")
         self.minsize(960, 640)
@@ -660,6 +670,12 @@ class App(tk.Tk):
         self.line_cooldown = 60
         self.audio_alert_enabled = True
         self.last_audio_alert_time = 0.0
+
+        # Fall event controller and refresh settings
+        self.fall_controller = FallEventController(
+            GLOBAL_CONFIG, line_channel_token=self.line_channel_access_token
+        )
+        self.gui_refresh_ms = getattr(GLOBAL_CONFIG, "gui_refresh_ms", 33)
         
         # Load configuration
         self.config_path = os.path.join(config.BASE_DIR, "client_config.json")
@@ -712,7 +728,7 @@ class App(tk.Tk):
         title_group = tk.Frame(brand_frame, bg=theme.BG_DARK)
         title_group.pack(side="left")
         
-        app_ver = getattr(config, 'APP_VERSION', 'v1.2.0')
+        app_ver = getattr(config, 'APP_VERSION', 'v1.3.0')
         lbl_title = tk.Label(title_group, text=f"PRE-FALL DETECTION 3D  {app_ver}", font=self.fonts.H1, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY)
         lbl_title.pack(anchor="w")
         
@@ -1024,18 +1040,17 @@ class App(tk.Tk):
             "fall_threshold": self.fall_threshold,
             "line_cooldown": self.line_cooldown,
             "audio_alert_enabled": self.audio_alert_enabled,
-            "cameras": [{
-                "name": c["name"],
-                "source": c["source"],
-                "line_user_id": c.get("line_user_id", c.get("line_token", "")),
-                "line_token": c.get("line_user_id", c.get("line_token", ""))
-            } for c in self.camera_configs]
+            "cameras": [
+                {
+                    "name": c["name"],
+                    "source": c["source"],
+                    "line_user_id": c.get("line_user_id", c.get("line_token", "")),
+                    "line_token": c.get("line_user_id", c.get("line_token", "")),
+                }
+                for c in self.camera_configs
+            ],
         }
-        try:
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(config_data, f, indent=4)
-        except Exception as e:
-            print(f"Error saving config: {e}")
+        save_runtime_config(self.config_path, config_data)
 
     def load_camera_config(self):
         self.line_channel_access_token = getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
@@ -1044,130 +1059,112 @@ class App(tk.Tk):
         self.fall_threshold = 0.6
         self.line_cooldown = 60
         self.audio_alert_enabled = True
-        default_cameras = [{"name": "Webcam 3D", "source": "0", "line_user_id": "", "line_token": ""}]
-        if os.path.exists(self.config_path):
-            try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if isinstance(data, dict):
-                        loaded_token = data.get("line_channel_access_token") or data.get("global_line_token")
-                        self.line_channel_access_token = loaded_token.strip() if loaded_token and loaded_token.strip() else getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
-                        self.global_line_user_id = data.get("global_line_user_id", "")
-                        self.global_line_token = self.line_channel_access_token
-                        self.fall_threshold = data.get("fall_threshold", 0.6)
-                        self.line_cooldown = data.get("line_cooldown", 60)
-                        self.audio_alert_enabled = data.get("audio_alert_enabled", True)
-                        cameras = data.get("cameras", default_cameras)
-                        for c in cameras:
-                            if "line_user_id" not in c and "line_token" in c:
-                                c["line_user_id"] = c.get("line_token", "")
-                        return cameras
-                    elif isinstance(data, list):
-                        return [{"name": c["name"], "source": c["source"], "line_user_id": "", "line_token": ""} for c in data]
-            except Exception as e:
-                print(f"Error loading config: {e}")
+        default_cameras = [
+            {"name": "Webcam 3D", "source": "0", "line_user_id": "", "line_token": ""}
+        ]
+        data = load_runtime_config(self.config_path)
+        if isinstance(data, dict) and data:
+            loaded_token = data.get("line_channel_access_token") or data.get("global_line_token")
+            self.line_channel_access_token = (
+                loaded_token.strip()
+                if loaded_token and loaded_token.strip()
+                else getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
+            )
+            self.global_line_user_id = data.get("global_line_user_id", "")
+            self.global_line_token = self.line_channel_access_token
+            self.fall_threshold = data.get("fall_threshold", 0.6)
+            self.line_cooldown = data.get("line_cooldown", 60)
+            self.audio_alert_enabled = data.get("audio_alert_enabled", True)
+            cameras = data.get("cameras", default_cameras)
+            for c in cameras:
+                if "line_user_id" not in c and "line_token" in c:
+                    c["line_user_id"] = c.get("line_token", "")
+            return cameras
         return default_cameras
 
     def update_gui_loop(self):
         any_fall = False
         fall_cam_name = ""
-        
+
         for cfg in self.camera_configs:
             cam_name = cfg.get("name", "")
             if cam_name in self.active_streams:
                 stream = self.active_streams[cam_name]
                 frame = stream.last_frame
-                
+
                 # Real-Time Telemetry Status Badge Update (No Mocking)
                 badge = cfg.get("status_badge")
                 if badge and badge.winfo_exists():
                     if not stream.is_running:
                         badge.configure(text="● OFFLINE", fg=theme.DANGER, bg="#2d0f0f")
                     elif stream.last_status == "FALL DETECTED":
-                        badge.configure(text=f"🚨 FALL RISK ({int(stream.last_prediction * 100)}%)", fg="#ffffff", bg=theme.DANGER)
+                        badge.configure(
+                            text=f"🚨 FALL RISK ({int(stream.last_prediction * 100)}%)",
+                            fg="#ffffff",
+                            bg=theme.DANGER,
+                        )
                     elif stream.connection_status == "ONLINE":
-                        badge.configure(text=f"● ONLINE ({int(stream.fps)} FPS)", fg=theme.SUCCESS, bg="#0f2d1e")
+                        badge.configure(
+                            text=f"● ONLINE ({int(stream.fps)} FPS)",
+                            fg=theme.SUCCESS,
+                            bg="#0f2d1e",
+                        )
                     elif stream.connection_status == "RECONNECTING":
-                        badge.configure(text=f"● RECONNECTING (#{stream.retry_count})", fg="#ff8c00", bg="#2d1a0f")
+                        badge.configure(
+                            text=f"● RECONNECTING (#{stream.retry_count})",
+                            fg="#ff8c00",
+                            bg="#2d1a0f",
+                        )
                     else:  # CONNECTING
                         badge.configure(text="● CONNECTING...", fg=theme.WARNING, bg="#2d240f")
-                
-                if frame is not None and "label_widget" in cfg and cfg["label_widget"].winfo_exists():
-                    # Calculate dimensions from container frame
+
+                if (
+                    frame is not None
+                    and "label_widget" in cfg
+                    and cfg["label_widget"].winfo_exists()
+                ):
                     container = cfg.get("container_widget", cfg["label_widget"])
                     w = container.winfo_width()
                     h = container.winfo_height()
-                    
-                    # Ultra-fast zero-compression frame conversion (12x faster than PNG)
+
                     imgtk = convert_cv2_to_tk_image(frame, target_width=w, target_height=h)
                     if imgtk:
                         cfg["label_widget"].imgtk = imgtk
                         cfg["label_widget"].configure(image=imgtk)
-                        
-                is_fall_detected = (stream.last_status == "FALL DETECTED") or stream.consume_fall_event()
+
+                is_fall_detected = (
+                    stream.last_status == "FALL DETECTED"
+                ) or stream.consume_fall_event()
                 if is_fall_detected:
                     any_fall = True
                     fall_cam_name = cam_name
-                    
-                    # Trigger Line Notification with Cooldown Check
-                    curr_time = time.time()
-                    last_sent = self.last_line_notify_time.get(cam_name, 0.0)
-                    if curr_time - last_sent > self.line_cooldown:
-                        self.last_line_notify_time[cam_name] = curr_time
-                        
-                        # Trigger local video clip recording
-                        video_path = stream.save_fall_clip()
-                        video_filename = os.path.basename(video_path)
-                        
-                        time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                        
-                        # Generate 5-frame fall evidence montage (frames 2, 4, 6, 8, 10)
-                        evidence_frames = stream.get_evidence_frames()
-                        montage_img = None
-                        if evidence_frames:
-                            montage_img = create_fall_evidence_montage(evidence_frames, cam_name, time_str, stream.last_prediction)
-                            evidence_filename = f"evidence_{cam_name}_{int(curr_time)}.jpg"
-                            evidence_path = os.path.join(config.BASE_DIR, "recorded_falls", evidence_filename)
-                            try:
-                                cv2.imwrite(evidence_path, montage_img)
-                            except Exception:
-                                pass
-                        
-                        channel_token = getattr(self, "line_channel_access_token", "") or self.global_line_token or getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
-                        target_user = cfg.get("line_user_id", "").strip() or cfg.get("line_token", "").strip() or self.global_line_user_id
-                        
-                        print(f"🚨 [FALL EVENT TRIGGERED] Camera: {cam_name} | User: {target_user} | Video: {video_filename}")
-                        if channel_token and target_user:
-                            send_line_fall_alert_async(
-                                channel_token=channel_token,
-                                destination_id=target_user,
-                                cam_name=cam_name,
-                                time_str=time_str,
-                                montage_img=montage_img,
-                                video_filename=video_filename
-                            )
-                        elif channel_token:
-                            msg = f"\n🚨 แจ้งเตือนตรวจพบการล้ม!\n📷 กล้อง: {cam_name.upper()}\n⏰ เวลา: {time_str}\n📂 บันทึกวิดีโอหลักฐาน: {video_filename}"
-                            send_line_notify_async(msg, channel_token)
-                            
+
+                    self.fall_controller.line_channel_token = (
+                        getattr(self, "line_channel_access_token", "")
+                        or self.global_line_token
+                        or getattr(config, "DEFAULT_LINE_CHANNEL_TOKEN", "")
+                    )
+                    self.fall_controller.process_fall_event(cam_name, stream, cfg)
+
         # Update Alert Banner & Audio Alert
         if any_fall:
-            self.toast.show_alert(f"⚠️ WARNING! FALL DETECTED ON CAMERA: {fall_cam_name.upper()} ⚠️", "danger")
-            if self.audio_alert_enabled:
-                curr_t = time.time()
-                if curr_t - self.last_audio_alert_time > 4.0:
-                    self.last_audio_alert_time = curr_t
+            self.toast.show_alert(
+                f"⚠️ WARNING! FALL DETECTED ON CAMERA: {fall_cam_name.upper()} ⚠️", "danger"
+            )
+            if self.audio_alert_enabled and self.fall_controller.should_alert_audio(fall_cam_name):
+                if winsound is not None:
                     try:
-                        import winsound
-                        threading.Thread(target=lambda: winsound.Beep(1000, 500), daemon=True).start()
+                        threading.Thread(
+                            target=lambda: winsound.Beep(1000, 500), daemon=True
+                        ).start()
                     except Exception:
                         pass
         else:
             # Only clear if it's currently a danger alert
             if self.toast.cget("bg") == theme.DANGER:
                 self.toast.clear()
-                
-        self.after(33, self.update_gui_loop)
+
+        self.after(self.gui_refresh_ms, self.update_gui_loop)
 
     def destroy(self):
         self.stop_all_streams()

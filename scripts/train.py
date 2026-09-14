@@ -7,12 +7,18 @@ import glob
 import logging
 import os
 import random
+import sys
 from pathlib import Path
+
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import pandas as pd
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
+from sklearn.utils.class_weight import compute_class_weight
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.layers import GRU, Dense, Dropout
 from tensorflow.keras.models import Sequential
 
@@ -25,7 +31,7 @@ logger = logging.getLogger(__name__)
 def set_reproducibility_seed(seed: int = 42) -> None:
     """Sets random seeds across Python, NumPy, and TensorFlow for reproducible training."""
     random.seed(seed)
-    np.random.seed(seed)
+    np.random.seed(seed)  # Needed for TF/Keras compatibility
     tf.random.set_seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
 
@@ -95,21 +101,35 @@ def create_sequences_vectorized(
     xs = np.lib.stride_tricks.as_strided(x, shape=shape, strides=strides).copy()
     ys = y[time_steps:].copy()
 
+    if np.isnan(xs).any() or np.isinf(xs).any():
+        raise ValueError("Dataset contains NaN or Inf feature values after sequence creation")
+
     return xs, ys
 
 
-def build_gru_model(time_steps: int, n_features: int) -> Sequential:
+def build_gru_model(
+    time_steps: int,
+    n_features: int,
+    gru_units: str = "64,32",
+    dropout: float = 0.2,
+    dense_units: int = 16,
+) -> Sequential:
     """Builds GRU binary classification architecture."""
-    model = Sequential(
-        [
-            GRU(64, return_sequences=True, input_shape=(time_steps, n_features)),
-            Dropout(0.2),
-            GRU(32),
-            Dropout(0.2),
-            Dense(16, activation="relu"),
-            Dense(1, activation="sigmoid"),
-        ]
+    units = [int(u.strip()) for u in gru_units.split(",")]
+
+    model = Sequential()
+    model.add(
+        GRU(units[0], return_sequences=(len(units) > 1), input_shape=(time_steps, n_features))
     )
+    model.add(Dropout(dropout))
+
+    for i in range(1, len(units)):
+        model.add(GRU(units[i], return_sequences=(i < len(units) - 1)))
+        model.add(Dropout(dropout))
+
+    model.add(Dense(dense_units, activation="relu"))
+    model.add(Dense(1, activation="sigmoid"))
+
     model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
     return model
 
@@ -119,6 +139,9 @@ def train(
     batch_size: int | None = None,
     test_size: float = 0.2,
     seed: int = 42,
+    gru_units: str = "64,32",
+    dropout: float = 0.2,
+    dense_units: int = 16,
 ) -> None:
     """Executes end-to-end model training, evaluation, and checkpoint saving."""
     set_reproducibility_seed(seed)
@@ -142,14 +165,38 @@ def train(
         xs, ys, test_size=test_size, random_state=seed, stratify=ys
     )
 
-    model = build_gru_model(GLOBAL_CONFIG.time_steps, xs.shape[2])
+    classes = np.unique(y_train)
+    class_weights_arr = compute_class_weight(class_weight="balanced", classes=classes, y=y_train)
+    class_weight_dict = dict(zip(classes, class_weights_arr, strict=False))
+    logger.info(
+        f"Class distribution: {np.bincount(y_train.astype(int))}, Weights: {class_weight_dict}"
+    )
+
+    model = build_gru_model(
+        GLOBAL_CONFIG.time_steps,
+        xs.shape[2],
+        gru_units=gru_units,
+        dropout=dropout,
+        dense_units=dense_units,
+    )
     logger.info("Starting model fit...")
+
+    Path("checkpoints").mkdir(parents=True, exist_ok=True)
+    callbacks = [
+        ModelCheckpoint(
+            "checkpoints/best_model.keras", save_best_only=True, monitor="val_accuracy"
+        ),
+        EarlyStopping(patience=5, restore_best_weights=True),
+    ]
+
     model.fit(
         x_train,
         y_train,
         validation_data=(x_val, y_val),
         epochs=epochs_val,
         batch_size=batch_size_val,
+        class_weight=class_weight_dict,
+        callbacks=callbacks,
         verbose=1,
     )
 
@@ -168,6 +215,11 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=None, help="Batch size for training")
     parser.add_argument("--test-size", type=float, default=0.2, help="Validation split fraction")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
+    parser.add_argument(
+        "--gru-units", type=str, default="64,32", help="Comma-separated list of GRU units"
+    )
+    parser.add_argument("--dropout", type=float, default=0.2, help="Dropout rate")
+    parser.add_argument("--dense-units", type=int, default=16, help="Units in the dense layer")
     args = parser.parse_args()
 
     train(
@@ -175,6 +227,9 @@ def main() -> None:
         batch_size=args.batch_size,
         test_size=args.test_size,
         seed=args.seed,
+        gru_units=args.gru_units,
+        dropout=args.dropout,
+        dense_units=args.dense_units,
     )
 
 

@@ -1,11 +1,12 @@
 # Fall Detection System Configuration
 
 [app]
-version = "1.2.0"
+version = "1.3.0"
 window_name = "Fall Detection System"
 window_width = 1280
 window_height = 720
 line_cooldown_seconds = 60
+gui_refresh_ms = 33
 
 [camera]
 default_index = 0
@@ -30,6 +31,7 @@ connections = [
 min_detection_confidence = 0.5
 min_presence_confidence = 0.5
 min_tracking_confidence = 0.5
+detection_resize_width = 640
 
 [preprocessing]
 jump_threshold = 0.15
@@ -44,3 +46,15 @@ scale_range = 0.05
 [notifications]
 line_channel_token = "dk9jyRVq40y3r88uZbiG98tINzh6uBrXZ64QEOtcABhXm3rcDLoBIPi4D6nw6ox6bEVdPdTl7htO8MfI3FERTGF8WMnSnQRhUzSzfOmk5AnTIgp4FFBXSJNhX8SuJYVFDTJJcLJxapSFsuMkQ4ER8AdB04t89/1O/w1cDnyilFU="
 
+[inference]
+skip_frames = 1
+fall_hold_seconds = 2.0
+evidence_frame_indices = [1, 3, 5, 7, 9]
+
+[recording]
+cleanup_max_size_mb = 500
+cleanup_max_age_days = 7
+
+[upload]
+primary_url = "https://catbox.moe/user/api.php"
+fallback_url = "https://tmpfiles.org/api/v1/upload"

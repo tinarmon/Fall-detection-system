@@ -60,10 +60,12 @@ class CameraStream:
         self.retry_count = 0
         self.last_frame_time = 0.0
 
-        self.last_frame: np.ndarray | None = None
-        self.fps = 0.0
-        self.last_prediction = 0.0
-        self.last_status = "CONNECTING"
+        self._state_lock = threading.Lock()
+        self._last_frame: np.ndarray | None = None
+        self._fps = 0.0
+        self._last_prediction = 0.0
+        self._last_status = "CONNECTING"
+
         self.sequence_buffer: deque[list[float]] = deque(maxlen=GLOBAL_CONFIG.time_steps)
         self.frame_history: deque[np.ndarray] = deque(maxlen=GLOBAL_CONFIG.time_steps)
         self.fall_event_pending = False
@@ -80,6 +82,48 @@ class CameraStream:
         self._worker_thread: threading.Thread | None = None
 
         self.fall_recorder = FallRecorder()
+
+    # --- Thread-safe property accessors ---
+
+    @property
+    def last_frame(self) -> np.ndarray | None:
+        with self._state_lock:
+            return self._last_frame
+
+    @last_frame.setter
+    def last_frame(self, value: np.ndarray | None) -> None:
+        with self._state_lock:
+            self._last_frame = value
+
+    @property
+    def fps(self) -> float:
+        with self._state_lock:
+            return self._fps
+
+    @fps.setter
+    def fps(self, value: float) -> None:
+        with self._state_lock:
+            self._fps = value
+
+    @property
+    def last_prediction(self) -> float:
+        with self._state_lock:
+            return self._last_prediction
+
+    @last_prediction.setter
+    def last_prediction(self, value: float) -> None:
+        with self._state_lock:
+            self._last_prediction = value
+
+    @property
+    def last_status(self) -> str:
+        with self._state_lock:
+            return self._last_status
+
+    @last_status.setter
+    def last_status(self, value: str) -> None:
+        with self._state_lock:
+            self._last_status = value
 
     def start(self) -> None:
         """Starts asynchronous reader and inference worker threads."""
@@ -139,6 +183,7 @@ class CameraStream:
         return None
 
     def _reader_loop(self) -> None:
+        reconnect_delay = GLOBAL_CONFIG.reconnect_delay_seconds
         while self.is_running:
             if self.cap is None or not self.cap.isOpened():
                 self.cap = self._open_capture()
@@ -146,7 +191,7 @@ class CameraStream:
                     self.connection_status = "RECONNECTING"
                     self.status_detail = f"Failed opening source {self.source}. Retrying..."
                     self.is_online = False
-                    time.sleep(1.0)
+                    time.sleep(reconnect_delay)
                     continue
 
             ret, frame = self.cap.read()
@@ -157,7 +202,7 @@ class CameraStream:
                 if self.cap:
                     self.cap.release()
                     self.cap = None
-                time.sleep(0.5)
+                time.sleep(reconnect_delay * 0.5)
                 continue
 
             self.is_online = True
@@ -173,6 +218,8 @@ class CameraStream:
         ui = UIManager()
         frame_counter = 0
         fps_start = time.time()
+        inference_counter = 0
+        skip_n = max(1, GLOBAL_CONFIG.inference_skip_frames)
 
         while self.is_running:
             got_frame = self._new_frame_event.wait(timeout=0.1)
@@ -190,70 +237,89 @@ class CameraStream:
 
             try:
                 frame_counter += 1
+                inference_counter += 1
                 elapsed = time.time() - fps_start
                 if elapsed >= 1.0:
                     self.fps = frame_counter / elapsed
                     frame_counter = 0
                     fps_start = time.time()
 
-                h, w = frame.shape[:2]
-                processed_frame, points_px, points_norm, points_world = (
-                    pose_estimator.process_frame(frame)
-                )
+                # Run pose detection on every Nth frame to limit CPU usage
+                run_inference = inference_counter >= skip_n
+                if run_inference:
+                    inference_counter = 0
 
-                is_valid_pose = len(points_norm) >= 6
+                h, w = frame.shape[:2]
+                processed_frame = frame.copy()
+                is_valid_pose = False
                 bbox = None
                 left_angle, right_angle = 0.0, 0.0
-
-                if is_valid_pose:
-                    xs = [pt[0] for pt in points_px.values()]
-                    ys = [pt[1] for pt in points_px.values()]
-                    pad_x, pad_y = int(w * 0.04), int(h * 0.04)
-                    bbox = (
-                        max(0, min(xs) - pad_x),
-                        max(0, min(ys) - pad_y),
-                        min(w, max(xs) + pad_x),
-                        min(h, max(ys) + pad_y),
-                    )
-
-                    if all(k in points_world for k in [11, 23, 25]):
-                        left_angle = calculate_angle_3d(
-                            points_world[11], points_world[23], points_world[25]
-                        )
-                    if all(k in points_world for k in [12, 24, 26]):
-                        right_angle = calculate_angle_3d(
-                            points_world[12], points_world[24], points_world[26]
-                        )
-
-                    rel_features = pose_estimator.get_relative_features(points_norm)
-                    features = [left_angle / 180.0, right_angle / 180.0] + rel_features
-                    self.sequence_buffer.append(features)
-                else:
-                    self.sequence_buffer.clear()
-
                 prediction = 0.0
                 status_text = "NORMAL"
                 theme_color = (0, 255, 0)
 
-                if (
-                    len(self.sequence_buffer) == GLOBAL_CONFIG.time_steps
-                    and shared_model is not None
-                ):
-                    seq = np.expand_dims(np.array(self.sequence_buffer, dtype=np.float32), axis=0)
-                    try:
-                        with model_lock:
-                            pred_val = float(shared_model(seq, training=False)[0][0])
-                        prediction = pred_val
-                    except (tf.errors.OpError, ValueError, TypeError) as ex:
-                        logger.error(f"Inference error: {ex}")
+                if run_inference:
+                    processed_frame, points_px, points_norm, points_world = (
+                        pose_estimator.process_frame(frame)
+                    )
 
-                    if prediction > GLOBAL_CONFIG.fall_threshold:
-                        status_text = "FALL DETECTED"
-                        theme_color = (0, 0, 255)
-                        self.fall_hold_until = time.time() + 2.0
-                        with self._raw_frame_lock:
-                            self.fall_event_pending = True
-                    elif time.time() < self.fall_hold_until:
+                    is_valid_pose = len(points_norm) >= 6
+
+                    if is_valid_pose:
+                        xs = [pt[0] for pt in points_px.values()]
+                        ys = [pt[1] for pt in points_px.values()]
+                        pad_x, pad_y = int(w * 0.04), int(h * 0.04)
+                        bbox = (
+                            max(0, min(xs) - pad_x),
+                            max(0, min(ys) - pad_y),
+                            min(w, max(xs) + pad_x),
+                            min(h, max(ys) + pad_y),
+                        )
+
+                        if all(k in points_world for k in [11, 23, 25]):
+                            left_angle = calculate_angle_3d(
+                                points_world[11], points_world[23], points_world[25]
+                            )
+                        if all(k in points_world for k in [12, 24, 26]):
+                            right_angle = calculate_angle_3d(
+                                points_world[12], points_world[24], points_world[26]
+                            )
+
+                        rel_features = pose_estimator.get_relative_features(points_norm)
+                        if rel_features is not None:
+                            features = [left_angle / 180.0, right_angle / 180.0] + rel_features
+                            self.sequence_buffer.append(features)
+                        else:
+                            self.sequence_buffer.clear()
+                    else:
+                        self.sequence_buffer.clear()
+
+                    if (
+                        len(self.sequence_buffer) == GLOBAL_CONFIG.time_steps
+                        and shared_model is not None
+                    ):
+                        seq = np.expand_dims(
+                            np.array(self.sequence_buffer, dtype=np.float32), axis=0
+                        )
+                        try:
+                            with model_lock:
+                                pred_val = float(shared_model(seq, training=False)[0][0])
+                            prediction = pred_val
+                        except (tf.errors.OpError, ValueError, TypeError) as ex:
+                            logger.error(f"Inference error: {ex}")
+
+                        if prediction > GLOBAL_CONFIG.fall_threshold:
+                            status_text = "FALL DETECTED"
+                            theme_color = (0, 0, 255)
+                            self.fall_hold_until = time.time() + GLOBAL_CONFIG.fall_hold_seconds
+                            with self._raw_frame_lock:
+                                self.fall_event_pending = True
+                        elif time.time() < self.fall_hold_until:
+                            status_text = "FALL DETECTED"
+                            theme_color = (0, 0, 255)
+                else:
+                    # Non-inference frame: retain last known status during hold
+                    if time.time() < self.fall_hold_until:
                         status_text = "FALL DETECTED"
                         theme_color = (0, 0, 255)
 
@@ -262,25 +328,26 @@ class CameraStream:
                     tester_name=self.name,
                     fps=self.fps,
                     status_text=status_text,
-                    prediction=prediction,
+                    prediction=prediction if run_inference else self.last_prediction,
                     theme_color=theme_color,
                     bbox=bbox,
                     source_label=f"{self.source}"
                     if isinstance(self.source, int)
                     else "RTSP IP STREAM",
                 )
-                if is_valid_pose:
+                if is_valid_pose and run_inference:
                     processed_frame = ui.draw_angles(
                         processed_frame, points_px, left_angle, right_angle
                     )
 
-                self.last_prediction = prediction
+                if run_inference:
+                    self.last_prediction = prediction
                 self.last_status = status_text
                 self.last_frame = processed_frame
                 self.frame_history.append(processed_frame.copy())
                 self.fall_recorder.write_frame(processed_frame)
 
-            except Exception as loop_err:
+            except (cv2.error, ValueError, RuntimeError) as loop_err:
                 logger.error(f"Error in camera {self.name} worker loop: {loop_err}", exc_info=True)
                 time.sleep(0.01)
 
@@ -298,8 +365,9 @@ class CameraStream:
             frames = list(self.frame_history)
         if not frames:
             return []
+        indices = GLOBAL_CONFIG.evidence_frame_indices
         if len(frames) >= 10:
-            return [frames[1], frames[3], frames[5], frames[7], frames[9]]
+            return [frames[i] for i in indices if i < len(frames)]
         elif len(frames) >= 5:
             idxs = np.linspace(0, len(frames) - 1, 5, dtype=int)
             return [frames[i] for i in idxs]
