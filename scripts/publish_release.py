@@ -102,6 +102,19 @@ def main():
             release_id = existing["id"]
             upload_url_template = existing["upload_url"]
             print(f"Release {tag} already exists (ID: {release_id})")
+            for asset in existing.get("assets", []):
+                if asset["name"] == "DPDF_Setup.exe":
+                    print(f"Deleting existing asset ID {asset['id']} to upload new build...")
+                    del_req = urllib.request.Request(
+                        f"https://api.github.com/repos/{repo}/releases/assets/{asset['id']}",
+                        headers=headers,
+                        method="DELETE",
+                    )
+                    try:
+                        with urllib.request.urlopen(del_req):
+                            print("Deleted old asset successfully.")
+                    except Exception as ex:
+                        print(f"Failed deleting old asset: {ex}")
     except urllib.error.HTTPError as e:
         if e.code == 404:
             pass
