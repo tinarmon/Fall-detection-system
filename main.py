@@ -55,7 +55,7 @@ import time
 import datetime
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import filedialog, messagebox, ttk
 import cv2
 import numpy as np
 
@@ -72,6 +72,11 @@ import theme
 from src.fall_detection.config import GLOBAL_CONFIG
 from src.fall_detection.controller import FallEventController
 from src.fall_detection.persistence import load_runtime_config, save_runtime_config
+from src.fall_detection.qr_scanner import (
+    decode_qr_from_frame,
+    decode_qr_from_image_path,
+    extract_line_id,
+)
 from core.camera_monitor import (
     CameraMonitor, send_line_push_async, send_line_notify_async,
     create_fall_alert_flex, create_fall_evidence_montage, send_line_fall_alert_async
@@ -382,6 +387,18 @@ class CameraConfigDialog(BaseModalDialog):
         )
         btn_test.pack(side="right", padx=(theme.SPACE_SM, 0))
 
+        btn_scan = SecondaryButton(
+            tk_entry_bar, text="📷 สแกน QR", command=self.scan_qr_token,
+            padx=theme.SPACE_SM, pady=theme.SPACE_XS, tooltip="สแกน QR Code เพื่อกรอกรหัสของกล้องนี้"
+        )
+        btn_scan.pack(side="right", padx=(theme.SPACE_XS, 0))
+
+        btn_paste = SecondaryButton(
+            tk_entry_bar, text="📋 วาง", command=self.smart_paste_token,
+            padx=theme.SPACE_SM, pady=theme.SPACE_XS, tooltip="วางและคัดกรองรหัส LINE ID จากคลิปบอร์ด"
+        )
+        btn_paste.pack(side="right", padx=(theme.SPACE_XS, 0))
+
         self.bind("<Return>", lambda e: self.do_save())
 
     def populate_camera_sources(self, initial_src="0"):
@@ -545,6 +562,35 @@ class CameraConfigDialog(BaseModalDialog):
         msg = f"\n🧪 [DPDF Alert Test]\nทดสอบการเชื่อมต่อกล้อง: {cam_name.upper()}\n⏰ เวลา: {time_str}"
         send_line_push_async(channel_token, user_id, message_text=msg, flex_container=flex, callback=cb)
 
+    def scan_qr_token(self):
+        def cb(scanned_id):
+            self.ent_token.delete(0, tk.END)
+            self.ent_token.insert(0, scanned_id)
+            self.lbl_src_status.configure(
+                text=f"✅ สแกนและกรอกรหัส LINE ID สำเร็จ: {scanned_id}",
+                fg=theme.SUCCESS
+            )
+        QRCodeScannerDialog(self.app, cb)
+
+    def smart_paste_token(self):
+        try:
+            clipboard_text = self.clipboard_get()
+        except Exception:
+            return
+        line_id = extract_line_id(clipboard_text)
+        if line_id:
+            self.ent_token.delete(0, tk.END)
+            self.ent_token.insert(0, line_id)
+            self.lbl_src_status.configure(
+                text=f"✅ ดึงรหัสจากคลิปบอร์ดสำเร็จ: {line_id}",
+                fg=theme.SUCCESS
+            )
+        else:
+            self.lbl_src_status.configure(
+                text="⚠️ ไม่พบรหัส LINE ID ที่ถูกต้องในคลิปบอร์ด",
+                fg=theme.WARNING
+            )
+
     def do_save(self):
         name = self.ent_name.get().strip() or f"Camera {self.idx+1}"
         selected = self.combo_src.get()
@@ -618,11 +664,14 @@ class HelpDialog(BaseModalDialog):
         t2_text = (
             "ขั้นตอนรับการแจ้งเตือน LINE (Messaging API):\n\n"
             "1. เพิ่มเพื่อนบอท LINE OA ของระบบ:\n"
-            "   - สแกน QR Code ด้านล่าง หรือกดลิงก์เพิ่มเพื่อน\n"
-            "   - เมื่อเพิ่มเพื่อนแล้ว ส่งข้อความอะไรก็ได้ บอทจะตอบกลับ User ID ของคุณทันที (ขึ้นต้นด้วย U...)\n"
-            "   - หากต้องการส่งเข้ากลุ่มแชต: ดึงบอทเข้ากลุ่ม แล้วพิมพ์ 'id' บอทจะตอบ Group ID (ขึ้นต้นด้วย C...)\n"
-            "   - นำรหัส User ID หรือ Group ID มาวางในช่อง 'User/Group ID' ในโปรแกรม\n\n"
-            "2. กดปุ่ม '💾 บันทึกตั้งค่า' และกด '🧪 ทดสอบส่ง' เพื่อตรวจสอบการเชื่อมต่อ"
+            "   • สแกน QR Code ด้านล่าง หรือกดลิงก์เพิ่มเพื่อน\n"
+            "   • เมื่อเพิ่มเพื่อนแล้ว ส่งข้อความอะไรก็ได้ บอทจะตอบกลับภาพ QR Code และ User ID ทันที\n"
+            "   • หากต้องการส่งเข้ากลุ่มแชต: ดึงบอทเข้ากลุ่ม แล้วพิมพ์ 'id' บอทจะส่ง QR Code และ Group ID กลับมา\n\n"
+            "2. เชื่อมต่อง่ายใน 1 วินาที (สแกนผ่านกล้อง ไม่ต้องพิมพ์):\n"
+            "   • กดปุ่ม '📷 สแกน QR' ที่แถบล่างของโปรแกรม\n"
+            "   • เปิดภาพ QR Code ในมือถือ แล้วนำมาจ่อหน้ากล้องคอมพิวเตอร์ ระบบจะสแกนและบันทึกให้อัตโนมัติ!\n"
+            "   • หรือกดปุ่ม '📋 วางรหัส' หากคุณก๊อปปี้ข้อความจากบอทมา (ระบบจะกรองเอาเฉพาะรหัสให้อัตโนมัติ)\n\n"
+            "3. กดปุ่ม '🧪 ทดสอบส่ง' เพื่อตรวจสอบว่าข้อความและภาพถ่ายหลักฐานส่งเข้าโทรศัพท์เรียบร้อย"
         )
         lbl_t2 = tk.Label(tab2_scroll, text=t2_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
         lbl_t2.pack(fill="x", anchor="nw")
@@ -695,6 +744,246 @@ class HelpDialog(BaseModalDialog):
         )
         lbl_t4 = tk.Label(tab4, text=t4_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
         lbl_t4.pack(fill="both", expand=True)
+
+
+class QRCodeScannerDialog(BaseModalDialog):
+    """Modal dialog for scanning LINE User ID/Group ID QR codes via webcam or image file."""
+
+    def __init__(self, parent, on_success_callback):
+        super().__init__(
+            parent,
+            title="📷 สแกน LINE QR Code เพื่อเชื่อมต่อระบบ",
+            width=540,
+            height=530,
+            resizable=False,
+            min_width=500,
+            min_height=480,
+        )
+        self.app = parent
+        self.on_success_callback = on_success_callback
+        self.detector = cv2.QRCodeDetector()
+        self._running = True
+        self._detected = False
+        self.temp_cap = None
+        self._photo_ref = None
+        self.stream_source = None
+
+        fonts = theme.AppFonts.get(self)
+
+        # Instructions banner
+        lbl_instruction = tk.Label(
+            self.body,
+            text="📱 เปิดภาพ QR Code จากแชตบอท แล้วนำหน้าจอมือถือมาจ่อตรงกลางกล้อง",
+            font=fonts.BODY,
+            bg=theme.SURFACE_CARD,
+            fg=theme.TEXT_PRIMARY,
+            padx=theme.SPACE_SM,
+            pady=theme.SPACE_SM,
+            bd=1,
+            relief="solid",
+        )
+        lbl_instruction.pack(fill="x", pady=(0, theme.SPACE_SM))
+
+        # Video canvas / preview label
+        self.preview_frame = tk.Frame(
+            self.body, bg=theme.OVERLAY_BG, width=480, height=320, bd=2, relief="solid"
+        )
+        self.preview_frame.pack(fill="both", expand=True)
+        self.preview_frame.pack_propagate(False)
+
+        self.lbl_video = tk.Label(self.preview_frame, bg=theme.OVERLAY_BG)
+        self.lbl_video.pack(fill="both", expand=True)
+
+        # Status text below video
+        self.lbl_status = tk.Label(
+            self.body,
+            text="⏳ กำลังตรวจจับสัญญาณกล้อง...",
+            font=fonts.CAPTION,
+            bg=theme.BG_DARK,
+            fg=theme.TEXT_SECONDARY,
+        )
+        self.lbl_status.pack(fill="x", pady=(theme.SPACE_XS, theme.SPACE_SM))
+
+        # Bottom buttons
+        btn_bar = tk.Frame(self.body, bg=theme.BG_DARK)
+        btn_bar.pack(fill="x")
+
+        btn_file = SecondaryButton(
+            btn_bar,
+            text="📁 เลือกภาพ QR จากเครื่อง",
+            command=self.browse_image_file,
+            padx=theme.SPACE_SM,
+            pady=theme.SPACE_XS,
+            tooltip="เลือกไฟล์รูปภาพ QR Code (PNG/JPG) ที่บันทึกไว้ในคอมพิวเตอร์",
+        )
+        btn_file.pack(side="left")
+
+        btn_cancel = SecondaryButton(
+            btn_bar,
+            text="ยกเลิก",
+            command=self.on_close,
+            padx=theme.SPACE_MD,
+            pady=theme.SPACE_XS,
+        )
+        btn_cancel.pack(side="right")
+
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        # Initialize video source
+        self._init_camera_source()
+        self.after(50, self._scan_loop)
+
+    def _init_camera_source(self):
+        # Prefer existing online stream from app to avoid hardware lockouts
+        for stream in getattr(self.app, "active_streams", {}).values():
+            if getattr(stream, "is_online", False):
+                self.stream_source = stream
+                self.lbl_status.configure(
+                    text="🟢 ใช้สัญญาณภาพจากกล้องที่กำลังเปิดอยู่", fg=theme.SUCCESS
+                )
+                return
+
+        # Otherwise open local webcam 0
+        self.stream_source = None
+        backend = cv2.CAP_DSHOW if os.name == "nt" else 0
+        try:
+            self.temp_cap = cv2.VideoCapture(0, backend)
+            if not self.temp_cap.isOpened():
+                self.temp_cap = cv2.VideoCapture(0)
+            if self.temp_cap.isOpened():
+                self.temp_cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                self.temp_cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                self.lbl_status.configure(
+                    text="📷 ส่องกล้อง: ถือหน้าจอมือถือตรงกลางกรอบเพื่อสแกน", fg=theme.PRIMARY
+                )
+            else:
+                self.lbl_status.configure(
+                    text="⚠️ ไม่สามารถเปิดกล้องได้ คุณสามารถเลือกไฟล์ภาพได้", fg=theme.WARNING
+                )
+        except Exception as ex:
+            self.lbl_status.configure(text=f"⚠️ เกิดข้อผิดพลาดกับกล้อง: {ex}", fg=theme.WARNING)
+
+    def _scan_loop(self):
+        if not self._running or self._detected:
+            return
+
+        frame = None
+        if self.stream_source and getattr(self.stream_source, "is_online", False):
+            frame = self.stream_source.get_latest_frame()
+        elif self.temp_cap and self.temp_cap.isOpened():
+            ret, cap_frame = self.temp_cap.read()
+            if ret and cap_frame is not None:
+                frame = cap_frame
+
+        if frame is not None and frame.size > 0:
+            disp_frame = frame.copy()
+            h, w = disp_frame.shape[:2]
+
+            # Center target box
+            box_size = min(w, h) // 2
+            cx, cy = w // 2, h // 2
+            x1, y1 = cx - box_size // 2, cy - box_size // 2
+            x2, y2 = cx + box_size // 2, cy + box_size // 2
+            line_len = 24
+            col_target = (0, 220, 255)
+
+            cv2.line(disp_frame, (x1, y1), (x1 + line_len, y1), col_target, 3)
+            cv2.line(disp_frame, (x1, y1), (x1, y1 + line_len), col_target, 3)
+            cv2.line(disp_frame, (x2, y1), (x2 - line_len, y1), col_target, 3)
+            cv2.line(disp_frame, (x2, y1), (x2, y1 + line_len), col_target, 3)
+            cv2.line(disp_frame, (x1, y2), (x1 + line_len, y2), col_target, 3)
+            cv2.line(disp_frame, (x1, y2), (x1, y2 - line_len), col_target, 3)
+            cv2.line(disp_frame, (x2, y2), (x2 - line_len, y2), col_target, 3)
+            cv2.line(disp_frame, (x2, y2), (x2, y2 - line_len), col_target, 3)
+
+            line_id, points = decode_qr_from_frame(frame, self.detector)
+
+            if points is not None and len(points) > 0:
+                pts = points.astype(np.int32).reshape((-1, 1, 2))
+                cv2.polylines(disp_frame, [pts], True, (0, 255, 0), 3)
+
+            if line_id:
+                self._handle_detection(line_id, disp_frame)
+                return
+
+            self._render_preview(disp_frame)
+
+        self.after(35, self._scan_loop)
+
+    def _handle_detection(self, line_id: str, frame: np.ndarray):
+        self._detected = True
+        self._running = False
+        if winsound:
+            try:
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            except Exception:
+                pass
+
+        h, w = frame.shape[:2]
+        cv2.rectangle(frame, (10, h - 55), (w - 10, h - 10), (0, 160, 0), -1)
+        cv2.putText(
+            frame,
+            f"DETECTED: {line_id[:20]}...",
+            (20, h - 22),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.65,
+            (255, 255, 255),
+            2,
+        )
+        self._render_preview(frame)
+
+        self.lbl_status.configure(text=f"✅ ตรวจพบรหัส: {line_id}", fg=theme.SUCCESS)
+        self.on_success_callback(line_id)
+        self.after(650, self.on_close)
+
+    def _render_preview(self, frame: np.ndarray):
+        try:
+            target_w = self.lbl_video.winfo_width()
+            target_h = self.lbl_video.winfo_height()
+            if target_w < 50 or target_h < 50:
+                target_w, target_h = 480, 320
+            self._photo_ref = convert_cv2_to_tk_image(frame, target_w, target_h)
+            self.lbl_video.configure(image=self._photo_ref)
+        except Exception:
+            pass
+
+    def browse_image_file(self):
+        filetypes = [
+            ("Image files", "*.png *.jpg *.jpeg *.bmp *.webp"),
+            ("All files", "*.*"),
+        ]
+        filename = filedialog.askopenfilename(
+            parent=self, title="เลือกไฟล์รูปภาพ QR Code", filetypes=filetypes
+        )
+        if not filename:
+            return
+
+        line_id = decode_qr_from_image_path(filename, self.detector)
+        if line_id:
+            self._detected = True
+            self._running = False
+            if winsound:
+                try:
+                    winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                except Exception:
+                    pass
+            self.lbl_status.configure(text=f"✅ ตรวจพบรหัสจากภาพ: {line_id}", fg=theme.SUCCESS)
+            self.on_success_callback(line_id)
+            self.after(500, self.on_close)
+        else:
+            messagebox.showwarning(
+                "ไม่พบรหัส", "ไม่พบ QR Code หรือรหัส LINE ID ในไฟล์ภาพที่เลือก", parent=self
+            )
+
+    def on_close(self):
+        self._running = False
+        if self.temp_cap is not None:
+            try:
+                self.temp_cap.release()
+            except Exception:
+                pass
+            self.temp_cap = None
+        self.destroy()
 
 
 class App(tk.Tk):
@@ -866,6 +1155,18 @@ class App(tk.Tk):
         )
         btn_line_help.pack(side="left", padx=(0, theme.SPACE_SM))
         
+        btn_scan_qr = SecondaryButton(
+            line_card, text="📷 สแกน QR", command=self.open_qr_scanner,
+            padx=theme.SPACE_SM, pady=theme.SPACE_XS, tooltip="เปิดกล้องสแกน QR Code เพื่อเชื่อมต่ออัตโนมัติ"
+        )
+        btn_scan_qr.pack(side="left", padx=(0, theme.SPACE_XS))
+
+        btn_smart_paste = SecondaryButton(
+            line_card, text="📋 วางรหัส", command=self.smart_paste_global_id,
+            padx=theme.SPACE_SM, pady=theme.SPACE_XS, tooltip="วางรหัสจากคลิปบอร์ด (กรองเอาเฉพาะรหัสอัตโนมัติ)"
+        )
+        btn_smart_paste.pack(side="left", padx=(0, theme.SPACE_SM))
+
         btn_test_line = SecondaryButton(
             line_card, text="🧪 ทดสอบส่ง", command=self.test_global_line_notify,
             padx=theme.SPACE_MD, pady=theme.SPACE_XS, tooltip="ทดสอบส่งข้อความแจ้งเตือนและ Flex Alert เข้า LINE"
@@ -938,6 +1239,30 @@ class App(tk.Tk):
             self.fall_controller.line_channel_token = self.line_channel_access_token
         self.save_camera_config()
         self.toast.show_alert("บันทึกรหัส LINE User ID เรียบร้อยแล้ว", "success", auto_hide_sec=3)
+
+    def open_qr_scanner(self):
+        def on_scanned(line_id):
+            self.ent_user_id.delete(0, tk.END)
+            self.ent_user_id.insert(0, line_id)
+            self.save_global_token()
+            self.toast.show_alert(f"สแกนและบันทึก LINE ID สำเร็จ: {line_id}", "success", auto_hide_sec=4)
+        QRCodeScannerDialog(self, on_scanned)
+
+    def smart_paste_global_id(self):
+        try:
+            clipboard_text = self.clipboard_get()
+        except Exception:
+            self.toast.show_alert("ไม่สามารถอ่านข้อมูลจากคลิปบอร์ดได้", "warning", auto_hide_sec=3)
+            return
+
+        line_id = extract_line_id(clipboard_text)
+        if line_id:
+            self.ent_user_id.delete(0, tk.END)
+            self.ent_user_id.insert(0, line_id)
+            self.save_global_token()
+            self.toast.show_alert(f"วางและบันทึกรหัสสำเร็จ: {line_id}", "success", auto_hide_sec=3)
+        else:
+            self.toast.show_alert("ไม่พบรหัส LINE User ID หรือ Group ID ที่ถูกต้องในคลิปบอร์ด", "danger", auto_hide_sec=4)
 
     def rebuild_grid_view(self):
         for widget in self.grid_container.winfo_children():
