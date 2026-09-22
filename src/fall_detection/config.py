@@ -32,7 +32,7 @@ class AppConfig:
     dataset_path: Path = field(init=False)
     live_data_path: Path = field(init=False)
 
-    app_version: str = "1.3.0"
+    app_version: str = "1.4.0"
     window_name: str = "Fall Detection System"
     window_width: int = 1280
     window_height: int = 720
@@ -154,7 +154,7 @@ def load_config(root_path: Path | None = None) -> AppConfig:
         data_dir=data_dir,
         raw_data_dir=data_dir / "raw",
         clean_data_dir=data_dir / "clean",
-        app_version=str(app_sec.get("version", "1.3.0")),
+        app_version=str(app_sec.get("version", "1.4.0")),
         window_name=str(app_sec.get("window_name", "Fall Detection System")),
         window_width=int(app_sec.get("window_width", 1280)),
         window_height=int(app_sec.get("window_height", 720)),

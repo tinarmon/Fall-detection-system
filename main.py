@@ -717,7 +717,7 @@ class HelpDialog(BaseModalDialog):
             "ข้อมูลระบบ:\n"
             "• Software: DPDF 3D Pre-Fall Detection System\n"
             "• Core AI: MediaPipe Pose 3D + GRU Temporal Network\n"
-            "• Status: Standalone Desktop Client v1.3"
+            "• Status: Standalone Desktop Client v1.4"
         )
         lbl_t3 = tk.Label(tab3, text=t3_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
         lbl_t3.pack(fill="both", expand=True)
@@ -989,7 +989,7 @@ class QRCodeScannerDialog(BaseModalDialog):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        app_ver = getattr(config, 'APP_VERSION', 'v1.3.0')
+        app_ver = getattr(config, 'APP_VERSION', 'v1.4.0')
         self.title(f"DPDF 3D - Pre-Fall Detection Dashboard ({app_ver})")
         self.geometry("1240x820")
         self.minsize(960, 640)

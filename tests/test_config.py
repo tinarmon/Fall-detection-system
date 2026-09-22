@@ -14,7 +14,7 @@ def test_load_config_valid_toml():
 
         toml_content = """
         [app]
-        version = "1.3.0"
+        version = "1.4.0"
         window_width = 800
 
         [camera]
@@ -31,7 +31,7 @@ def test_load_config_valid_toml():
 
         config = load_config(tmp_path)
 
-        assert config.app_version == "1.3.0"
+        assert config.app_version == "1.4.0"
         assert config.window_width == 800
         assert config.network_timeout_seconds == 12.0
         assert config.reconnect_max_backoff_seconds == 20.0
@@ -46,7 +46,7 @@ def test_load_config_missing_toml():
 
         config = load_config(tmp_path)
 
-        assert config.app_version == "1.3.0"
+        assert config.app_version == "1.4.0"
         assert config.window_width == 1280
         assert config.time_steps == 10
         assert config.fall_threshold == 0.6
