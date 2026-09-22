@@ -25,9 +25,9 @@ def get_github_token() -> str:
 
 def main():
     repo = "tinarmon/Fall-detection-system"
-    tag = "v1.3.0"
-    target_branch = "Rule1.3.0"
-    release_name = "v1.3.0 - Performance & Thread Safety Release"
+    tag = "v1.4.0"
+    target_branch = "ConnectionImprov"
+    release_name = "v1.4.0 - Remote Camera & LINE QR Scan Release"
     installer_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "InstallerFile",
@@ -49,35 +49,38 @@ def main():
         "User-Agent": "ReleasePublisher/1.0",
     }
 
-    body_text = """## 🚀 Highlights in v1.3.0
+    body_text = """## 🌟 ภาพรวมการอัปเดตเวอร์ชัน v1.4.0 (What's New in v1.4.0)
 
-เวอร์ชัน v1.3.0 อัปเกรดประสิทธิภาพการประมวลผล AI การจัดการเธรด และโครงสร้างสถาปัตยกรรมภายใน เพื่อความเสถียรและรวดเร็วสูงสุด
-
-### ⚡ Performance & Inference Optimization (ประสิทธิภาพความเร็ว)
-* **MediaPipe Video Mode:** สลับไปใช้ `RunningMode.VIDEO` พร้อมระบบ Monotonic Frame Timestamps ทำให้โมเดลแชร์การตรวจจับระหว่างเฟรมต่อเนื่อง ลดภาระการทำงานของ CPU ลง 30–40%
-* **Inference Frame Skipping:** รองรับการตั้งค่าข้ามการประมวลผล Pose Detection ทุก ๆ N เฟรม (ค่าเริ่มต้นแสดงผล 30-60 FPS ลื่นไหล แต่รัน AI ตามรอบที่กำหนด)
-* **Decoupled Pose Drawing:** แยกขั้นตอนการวาดโครงกระดูกออกจาก Logic การตรวจจับ (Single Responsibility)
-
-### 🔒 Thread Safety & Resilience (ความปลอดภัยของเธรดและข้อผิดพลาด)
-* **State Locking:** ป้องกัน Data Race ระหว่าง Worker Thread กับ GUI Main Thread ด้วย Lock-protected property accessors สำหรับ `last_frame`, `fps`, `last_prediction`, `last_status`
-* **Bounded Notifications:** เปลี่ยนการสร้าง Thread อิสระมาใช้ `ThreadPoolExecutor(max_workers=3)` พร้อมระบบ Single-retry อัตโนมัติ ป้องกันปัญหาค้างหรือ Thread ทะลัก
-* **Video Writer & Cleanup Protection:** เพิ่มการตรวจสอบ `VideoWriter.isOpened()` และเพิ่ม Concurrency Lock ป้องกัน TOCTOU Race Condition ขณะบันทึกคลิปหลักฐานการล้มพร้อมกัน
-
-### 📦 Centralized Configuration (การตั้งค่ารวมศูนย์)
-* ย้ายค่าคงที่กว่า 10 ตัวจากโค้ดเข้ามาอยู่ใน `configs/config.toml` (`[inference]`, `[recording]`, `[upload]`, `gui_refresh_ms`)
-* รองรับการปรับแต่ง URL โฮสต์สำรองภาพหลักฐาน (`catbox.moe` และ `tmpfiles.org`)
-
-### 🧩 Controller & Architecture Decomposition
-* แยก Controller ตรวจจับและส่งการแจ้งเตือนออกมาเป็นโมดูล `src/fall_detection/controller.py`
-* เพิ่มโมดูลจัดเก็บค่าการทำงานแบบ Atomic `src/fall_detection/persistence.py`
-* เพิ่มชุด Automated Test Suite ใหม่ ครอบคลุมเป็น **26 การทดสอบ** (ผ่าน 100%)
+เวอร์ชัน **v1.4.0** มุ่งเน้นการแก้ปัญหาการใช้งานจริง 2 เรื่องใหญ่: **การเชื่อมต่อกล้องระยะไกลข้ามเครือข่าย** และ **การเชื่อมต่อ LINE แจ้งเตือนแบบไม่ต้องพิมพ์รหัสยาว 33 ตัว** ให้สะดวก ง่าย และรวดเร็วที่สุดสำหรับทุกคน
 
 ---
-### 📥 Installation Instructions (ขั้นตอนการติดตั้ง)
+
+### 1. 📷 สแกน QR Code เชื่อมต่อ LINE ใน 1 วินาที (Scan-to-Connect)
+* **ไม่ต้องพิมพ์รหัส 33 ตัวอีกต่อไป**: จากเดิมที่ผู้ใช้ต้องคัดลอกรหัส User ID / Group ID ยาวๆ เช่น `U4af4980629...` มาใส่ ตอนนี้เพียงกดปุ่ม **"📷 สแกน QR"** แล้วนำหน้าจอมือถือที่มีภาพ QR Code มาจ่อหน้ากล้องคอมพิวเตอร์ ระบบจะสแกนและบันทึกรหัสให้อัตโนมัติใน 1 วินาที!
+* **ปุ่ม Smart Paste (📋 วางรหัส)**: กรองเอาเฉพาะรหัส LINE ID ที่ถูกต้องจากคลิปบอร์ดให้อัตโนมัติ แม้ผู้ใช้จะก๊อปปี้ติดข้อความทักทายภาษาไทยมาทั้งประโยค
+* **อัปเดตบอท LINE**: โค้ด Webhook ใหม่จะตอบกลับทั้งภาพ QR Code ชัดระดับ HD และรหัสข้อความพร้อมกัน
+
+---
+
+### 2. 🌐 เชื่อมต่อกล้องไร้สายระยะไกลได้ง่ายขึ้น (Remote Camera Ready)
+* **ปุ่มแม่แบบกล้องในคลิกเดียว (Presets Toolbar)**:
+  * `[🏠 Tapo LAN]`: สำหรับกล้อง TP-Link Tapo ที่อยู่ในบ้านเดียวกัน
+  * `[🌐 Tailscale (กล้องระยะไกล)]`: สำหรับดูกล้องข้ามบ้านหรือคนละเครือข่าย
+  * `[⚡ ใช้ /stream2]`: สลับไปใช้ Sub-stream ความเร็วสูง ประหยัดเน็ตบ้านและภาพไม่ค้าง
+* **ระบบกู้คืนสัญญาณอัตโนมัติ (Exponential Reconnect Backoff)**: หากเน็ตบ้านหรือสัญญาณ WiFi หลุดชั่วคราว ระบบจะหน่วงเวลากู้สัญญาณอย่างชาญฉลาด (1s ➔ 2s ➔ 4s ➔ 10s) ป้องกันโปรแกรมค้าง และจะกลับมาทำงานลื่นไหลทันทีที่สัญญาณกลับมา
+
+---
+
+### 3. 📖 คู่มือการใช้งานฉบับเข้าใจง่าย (User-Friendly README & In-App Guide)
+* ปรับปรุงหน้าต่างช่วยเหลือในโปรแกรม (กด F1) เพิ่มแท็บแนะนำขั้นตอนการตั้งค่ากล้อง Tapo C200 และ Tailscale
+* ปรับปรุงหน้า README.md เน้นอธิบายความสามารถของระบบและวิธีเริ่มต้นใช้งาน 3 ขั้นตอนแบบไม่เน้นศัพท์เทคนิคเชิงลึก
+
+---
+
+### 📥 ขั้นตอนการติดตั้ง (Installation Instructions)
 1. ดาวน์โหลดไฟล์ `DPDF_Setup.exe` ด้านล่าง
-2. ดับเบิลคลิกไฟล์เพื่อเปิดตัวติดตั้ง Wizard
-3. เลือกไดเรกทอรีที่ต้องการและกด Install
-4. เปิดใช้งานผ่าน Shortcut หน้า Desktop หรือโฟลเดอร์ที่ติดตั้ง
+2. ดับเบิลคลิกเปิดไฟล์ตัวติดตั้ง และกด **Install**
+3. เริ่มต้นใช้งานผ่านไอคอนบนหน้าจอ Desktop ได้ทันที
 """
 
     release_payload = {
@@ -166,7 +169,7 @@ def main():
             print(f"Upload failed: {e.code} - {err_body}")
             sys.exit(1)
 
-    print(f"\nRelease v1.3.0 is live at: https://github.com/{repo}/releases/tag/{tag}")
+    print(f"\nRelease {tag} is live at: https://github.com/{repo}/releases/tag/{tag}")
 
 
 if __name__ == "__main__":
