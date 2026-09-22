@@ -65,9 +65,7 @@ class FallEventController:
                 or self.default_user_id.strip()
                 or getattr(self, "global_line_user_id", "").strip()
             )
-            channel_token = (
-                self.line_channel_token or self.app_config.line_channel_token
-            ).strip()
+            channel_token = (self.line_channel_token or self.app_config.line_channel_token).strip()
 
             logger.info(
                 "🚨 [FALL EVENT TRIGGERED] Camera: %s | User: %s | Video: %s",

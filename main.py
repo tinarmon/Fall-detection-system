@@ -281,13 +281,31 @@ class CameraConfigDialog(BaseModalDialog):
         header_rtsp.pack(fill="x", pady=(0, 2))
 
         lbl_rtsp = tk.Label(
-            header_rtsp, text="ลิงก์สตรีม RTSP (สำหรับกล้องวงจรปิด IP Camera):", font=fonts.CAPTION,
+            header_rtsp, text="ลิงก์สตรีมเครือข่าย (RTSP / RTMP / Tailscale IP):", font=fonts.CAPTION,
             bg=theme.SURFACE_CARD, fg=theme.TEXT_SECONDARY
         )
         lbl_rtsp.pack(side="left")
 
+        # Preset bar for quick Tapo and remote camera setup
+        preset_bar = tk.Frame(card_src, bg=theme.SURFACE_CARD)
+        preset_bar.pack(fill="x", pady=(2, 4))
+
+        self.btn_preset_lan = tk.Button(
+            preset_bar, text="🏠 Tapo LAN", font=fonts.CAPTION,
+            bg=theme.SURFACE_ELEVATED, fg=theme.TEXT_PRIMARY, activebackground=theme.SURFACE_HOVER,
+            bd=1, relief="solid", cursor="hand2", command=self.preset_tapo_lan
+        )
+        self.btn_preset_lan.pack(side="left", padx=(0, theme.SPACE_XS))
+
+        self.btn_preset_tailscale = tk.Button(
+            preset_bar, text="🌐 Tailscale (กล้องระยะไกล)", font=fonts.CAPTION,
+            bg=theme.SURFACE_ELEVATED, fg=theme.SUCCESS, activebackground=theme.SURFACE_HOVER,
+            bd=1, relief="solid", cursor="hand2", command=self.preset_tailscale
+        )
+        self.btn_preset_tailscale.pack(side="left", padx=(0, theme.SPACE_XS))
+
         self.btn_switch_s2 = tk.Button(
-            header_rtsp, text="⚡ ใช้ /stream2 (แนะนำ)", font=fonts.CAPTION,
+            preset_bar, text="⚡ ใช้ /stream2", font=fonts.CAPTION,
             bg=theme.SURFACE_ELEVATED, fg=theme.PRIMARY, activebackground=theme.SURFACE_HOVER,
             activeforeground=theme.PRIMARY, bd=1, relief="solid", cursor="hand2",
             command=self.switch_to_stream2
@@ -427,6 +445,22 @@ class CameraConfigDialog(BaseModalDialog):
         self.lbl_src_status.configure(
             text="💡 ปรับเป็น /stream2 (Sub-stream) เรียบร้อยแล้ว แนะนำสำหรับ AI ป้องกันภาพค้าง",
             fg=theme.PRIMARY
+        )
+
+    def preset_tapo_lan(self):
+        self.ent_rtsp.delete(0, tk.END)
+        self.ent_rtsp.insert(0, "rtsp://username:password@192.168.1.100:554/stream2")
+        self.lbl_src_status.configure(
+            text="💡 ตัวอย่าง Tapo C200 (WiFi เดียวกัน): แก้ username, password และ IP ของกล้อง",
+            fg=theme.PRIMARY
+        )
+
+    def preset_tailscale(self):
+        self.ent_rtsp.delete(0, tk.END)
+        self.ent_rtsp.insert(0, "rtsp://username:password@100.x.y.z:554/stream2")
+        self.lbl_src_status.configure(
+            text="🌐 ตัวอย่างสตรีมกล้องระยะไกลผ่าน Tailscale: ใส่ IP 100.x.y.z หรือ Subnet IP ปลายทาง",
+            fg=theme.SUCCESS
         )
 
     def test_rtsp_stream(self):
@@ -634,10 +668,33 @@ class HelpDialog(BaseModalDialog):
             "ข้อมูลระบบ:\n"
             "• Software: DPDF 3D Pre-Fall Detection System\n"
             "• Core AI: MediaPipe Pose 3D + GRU Temporal Network\n"
-            "• Status: Standalone Desktop Client v2.0"
+            "• Status: Standalone Desktop Client v1.3"
         )
         lbl_t3 = tk.Label(tab3, text=t3_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
         lbl_t3.pack(fill="both", expand=True)
+
+        # Tab 4: Remote / Faraway Cameras (Tapo C200 & Tailscale)
+        tab4 = tk.Frame(notebook, bg=theme.BG_DARK, padx=theme.SPACE_MD, pady=theme.SPACE_MD)
+        notebook.add(tab4, text="🌐 Remote Cameras")
+
+        t4_text = (
+            "วิธีเชื่อมต่อกล้องระยะไกลข้ามบ้าน / ข้ามเครือข่าย (Tapo C200 & Faraway Setup):\n\n"
+            "1. เปิดใช้งาน Camera Account บนแอป Tapo (กล้อง TP-Link Tapo C200):\n"
+            "   • เปิดแอป Tapo บนมือถือ ➜ เลือกกล้อง ➜ กดไอคอนฟันเฟือง (ตั้งค่า)\n"
+            "   • เข้าไปที่ Advanced Settings (การตั้งค่าขั้นสูง) ➜ Camera Account\n"
+            "   • กำหนดชื่อผู้ใช้ (Username) และรหัสผ่าน (Password) สำหรับดึงสตรีม\n\n"
+            "2. เชื่อมต่อระยะไกลผ่าน Tailscale (แนะนำที่สุด - ง่ายและปลอดภัย 100%):\n"
+            "   • ปัญหา: หากกล้องอยู่คนละบ้าน คนละ WiFi ระบบจะมองไม่เห็นกันโดยตรง\n"
+            "   • วิธีแก้: ติดตั้งแอป Tailscale (ฟรี) บนอุปกรณ์ที่บ้านปลายทาง (เช่น คอมฯ หรือโน้ตบุ๊ก)\n"
+            "     และบนเครื่องตรวจจับนี้ จากนั้นล็อกอินด้วยบัญชีเดียวกัน (เช่น Google Account)\n"
+            "   • เชื่อมต่อสตรีมได้ทันทีผ่าน IP เครือข่าย: rtsp://username:password@<IP>:554/stream2\n"
+            "   • ข้อดี: ไม่ต้องแก้การตั้งค่าเราเตอร์ ไม่ต้องเปิด Port Forwarding ใช้งานได้แม้เน็ต 4G/5G\n\n"
+            "3. คำแนะนำประสิทธิภาพสำหรับกล้องระยะไกล:\n"
+            "   • แนะนำให้เลือกใช้ /stream2 (Sub-stream) เสมอสำหรับการดูกล้องระยะไกล\n"
+            "   • ช่วยประหยัดแบนด์วิดท์อินเทอร์เน็ต ได้ภาพลื่นไหลต่อเนื่อง และเหมาะกับ AI มากที่สุด"
+        )
+        lbl_t4 = tk.Label(tab4, text=t4_text, font=fonts.BODY, bg=theme.BG_DARK, fg=theme.TEXT_PRIMARY, justify="left", anchor="nw")
+        lbl_t4.pack(fill="both", expand=True)
 
 
 class App(tk.Tk):

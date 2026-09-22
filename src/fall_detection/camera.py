@@ -171,7 +171,14 @@ class CameraStream:
             if not cap.isOpened():
                 cap = cv2.VideoCapture(idx)
         else:
-            cap = cv2.VideoCapture(str(self.source), cv2.CAP_FFMPEG)
+            transport = getattr(GLOBAL_CONFIG, "rtsp_transport", "tcp")
+            os.environ["OPENCV_FFMPEG_RTSP_TRANSPORT"] = transport
+            cap = cv2.VideoCapture(str(self.source).strip(), cv2.CAP_FFMPEG)
+            timeout_sec = getattr(GLOBAL_CONFIG, "network_timeout_seconds", 8.0)
+            if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+                cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, int(timeout_sec * 1000))
+            if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+                cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, int(timeout_sec * 1000))
 
         if cap.isOpened():
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
@@ -183,28 +190,40 @@ class CameraStream:
         return None
 
     def _reader_loop(self) -> None:
-        reconnect_delay = GLOBAL_CONFIG.reconnect_delay_seconds
+        base_delay = GLOBAL_CONFIG.reconnect_delay_seconds
+        max_backoff = getattr(GLOBAL_CONFIG, "reconnect_max_backoff_seconds", 10.0)
+        current_delay = base_delay
+
         while self.is_running:
             if self.cap is None or not self.cap.isOpened():
                 self.cap = self._open_capture()
                 if self.cap is None:
+                    self.retry_count += 1
                     self.connection_status = "RECONNECTING"
-                    self.status_detail = f"Failed opening source {self.source}. Retrying..."
+                    self.status_detail = (
+                        f"Failed opening source {self.source}. Retrying in {current_delay:.1f}s..."
+                    )
                     self.is_online = False
-                    time.sleep(reconnect_delay)
+                    time.sleep(current_delay)
+                    current_delay = min(current_delay * 2.0, max_backoff)
                     continue
 
             ret, frame = self.cap.read()
             if not ret or frame is None or frame.size == 0:
+                self.retry_count += 1
                 self.connection_status = "RECONNECTING"
-                self.status_detail = "Dropped frame or signal lost. Reconnecting..."
+                self.status_detail = f"Signal lost. Reconnecting in {current_delay:.1f}s..."
                 self.is_online = False
                 if self.cap:
                     self.cap.release()
                     self.cap = None
-                time.sleep(reconnect_delay * 0.5)
+                time.sleep(current_delay)
+                current_delay = min(current_delay * 2.0, max_backoff)
                 continue
 
+            # Successful frame acquisition resets backoff delay and retry counter
+            current_delay = base_delay
+            self.retry_count = 0
             self.is_online = True
             self.connection_status = "ONLINE"
             self.status_detail = "Signal active"
@@ -406,15 +425,18 @@ class CameraMonitor:
 
     @staticmethod
     def test_stream_connection(
-        source: int | str, timeout_sec: float = 6.0
+        source: int | str, timeout_sec: float | None = None
     ) -> tuple[bool, str, str]:
-        """Probes a camera index or RTSP URL to verify responsiveness and resolution."""
+        """Probes a camera index or remote stream URL to verify responsiveness and resolution."""
+        if timeout_sec is None:
+            timeout_sec = getattr(GLOBAL_CONFIG, "network_timeout_seconds", 8.0)
         try:
             if str(source).isdigit():
                 backend = cv2.CAP_DSHOW if os.name == "nt" else 0
                 cap = cv2.VideoCapture(int(source), backend)
             else:
-                os.environ["OPENCV_FFMPEG_RTSP_TRANSPORT"] = "tcp"
+                transport = getattr(GLOBAL_CONFIG, "rtsp_transport", "tcp")
+                os.environ["OPENCV_FFMPEG_RTSP_TRANSPORT"] = transport
                 cap = cv2.VideoCapture(str(source).strip(), cv2.CAP_FFMPEG)
                 if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
                     cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, int(timeout_sec * 1000))

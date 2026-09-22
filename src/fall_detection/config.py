@@ -86,6 +86,11 @@ class AppConfig:
     upload_primary_url: str = "https://catbox.moe/user/api.php"
     upload_fallback_url: str = "https://tmpfiles.org/api/v1/upload"
 
+    # Remote & Network streaming settings
+    network_timeout_seconds: float = 8.0
+    reconnect_max_backoff_seconds: float = 10.0
+    rtsp_transport: str = "tcp"
+
     def __post_init__(self):
         object.__setattr__(self, "model_path", self.assets_dir / "fall_model.keras")
         object.__setattr__(self, "pose_task_path", self.assets_dir / "pose_landmarker_full.task")
@@ -187,6 +192,9 @@ def load_config(root_path: Path | None = None) -> AppConfig:
         upload_fallback_url=str(
             upload_sec.get("fallback_url", "https://tmpfiles.org/api/v1/upload")
         ),
+        network_timeout_seconds=float(cam_sec.get("network_timeout_seconds", 8.0)),
+        reconnect_max_backoff_seconds=float(cam_sec.get("reconnect_max_backoff_seconds", 10.0)),
+        rtsp_transport=str(cam_sec.get("rtsp_transport", "tcp")),
     )
 
 
