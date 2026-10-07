@@ -28,6 +28,7 @@ class AppConfig:
     use_clean_data: bool = True
 
     model_path: Path = field(init=False)
+    tflite_model_path: Path = field(init=False)
     pose_task_path: Path = field(init=False)
     dataset_path: Path = field(init=False)
     live_data_path: Path = field(init=False)
@@ -46,6 +47,7 @@ class AppConfig:
     epochs: int = 30
     batch_size: int = 32
     fall_threshold: float = 0.6
+    inference_backend: str = "auto"
 
     target_landmarks: list[int] = field(default_factory=lambda: [11, 12, 23, 24, 25, 26])
     connections: list[tuple[int, int]] = field(
@@ -93,6 +95,7 @@ class AppConfig:
 
     def __post_init__(self):
         object.__setattr__(self, "model_path", self.assets_dir / "fall_model.keras")
+        object.__setattr__(self, "tflite_model_path", self.assets_dir / "fall_model.tflite")
         object.__setattr__(self, "pose_task_path", self.assets_dir / "pose_landmarker_full.task")
         object.__setattr__(self, "dataset_path", self.data_dir / "fall_dataset.csv")
         object.__setattr__(self, "live_data_path", self.data_dir / "live_collected_data.csv")

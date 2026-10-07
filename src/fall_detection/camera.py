@@ -8,12 +8,13 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
-import tensorflow as tf
 
 from src.fall_detection.config import GLOBAL_CONFIG
+from src.fall_detection.engine import ModelInferenceEngine
 from src.fall_detection.geometry import calculate_angle_3d
 from src.fall_detection.pose import PoseEstimator
 from src.fall_detection.recorder import FallRecorder
@@ -24,22 +25,19 @@ os.environ["OPENCV_FFMPEG_RTSP_TRANSPORT"] = "tcp"
 
 logger = logging.getLogger(__name__)
 
-model_lock = threading.Lock()
-shared_model: tf.keras.Model | None = None
+inference_engine = ModelInferenceEngine()
+model_lock = inference_engine._lock
+shared_model = inference_engine._keras_model
+_camera_probe_lock = threading.Lock()
 
 
 def load_trained_model(model_path: str | Path | None = None) -> bool:
-    """Loads trained Keras sequential model into shared singleton reference."""
-    global shared_model
-    path = Path(model_path or GLOBAL_CONFIG.model_path)
-    if path.is_file():
-        try:
-            with model_lock:
-                shared_model = tf.keras.models.load_model(str(path))
-            return True
-        except (OSError, ValueError) as ex:
-            logger.error(f"Failed loading model from {path}: {ex}")
-    return False
+    """Reloads trained model into shared inference engine."""
+    global inference_engine, model_lock, shared_model
+    inference_engine = ModelInferenceEngine(model_path=Path(model_path) if model_path else None)
+    model_lock = inference_engine._lock
+    shared_model = inference_engine._keras_model
+    return inference_engine.is_ready
 
 
 class CameraStream:
@@ -315,17 +313,10 @@ class CameraStream:
 
                     if (
                         len(self.sequence_buffer) == GLOBAL_CONFIG.time_steps
-                        and shared_model is not None
+                        and inference_engine.is_ready
                     ):
-                        seq = np.expand_dims(
-                            np.array(self.sequence_buffer, dtype=np.float32), axis=0
-                        )
-                        try:
-                            with model_lock:
-                                pred_val = float(shared_model(seq, training=False)[0][0])
-                            prediction = pred_val
-                        except (tf.errors.OpError, ValueError, TypeError) as ex:
-                            logger.error(f"Inference error: {ex}")
+                        seq = np.array(self.sequence_buffer, dtype=np.float32)
+                        prediction = inference_engine.predict_sequence(seq)
 
                         if prediction > GLOBAL_CONFIG.fall_threshold:
                             status_text = "FALL DETECTED"
@@ -402,6 +393,64 @@ class CameraStream:
         return self.fall_recorder.save_recording(self.name, self.width, self.height, fps=fps_val)
 
 
+class CameraWatcher:
+    """Background service that periodically probes for camera connection changes."""
+
+    def __init__(self, interval_seconds: float = 4.0, max_probe: int = 6):
+        self.interval = interval_seconds
+        self.max_probe = max_probe
+        self._listeners: list[Any] = []
+        self._lock = threading.Lock()
+        self._is_running = False
+        self._thread: threading.Thread | None = None
+        self._last_detected: list[int] = []
+
+    def add_listener(self, callback: Any) -> None:
+        with self._lock:
+            if callback not in self._listeners:
+                self._listeners.append(callback)
+
+    def remove_listener(self, callback: Any) -> None:
+        with self._lock:
+            if callback in self._listeners:
+                self._listeners.remove(callback)
+
+    def start(self) -> None:
+        if self._is_running:
+            return
+        self._is_running = True
+        self._thread = threading.Thread(target=self._run, daemon=True, name="CameraWatcherThread")
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._is_running = False
+
+    def trigger_scan(self) -> tuple[list[int], list[dict[str, Any]]]:
+        """Performs an immediate probe and notifies listeners if state changed."""
+        info = CameraMonitor.detect_available_cameras_info(self.max_probe)
+        cameras = [c["index"] for c in info]
+        with self._lock:
+            changed = cameras != self._last_detected
+            self._last_detected = list(cameras)
+            listeners = list(self._listeners)
+
+        if changed:
+            for cb in listeners:
+                try:
+                    cb(cameras, info)
+                except Exception as ex:
+                    logger.debug(f"CameraWatcher listener error: {ex}")
+        return cameras, info
+
+    def _run(self) -> None:
+        while self._is_running:
+            try:
+                self.trigger_scan()
+            except Exception as ex:
+                logger.debug(f"Error in CameraWatcher loop: {ex}")
+            time.sleep(self.interval)
+
+
 class CameraMonitor:
     """Oversees multiple active CameraStream instances and manages model inference lifecycle."""
 
@@ -409,18 +458,38 @@ class CameraMonitor:
         self.app = app
         self.active_streams: dict[str, CameraStream] = {}
         load_trained_model()
+        self.watcher = CameraWatcher(interval_seconds=4.0)
 
     @staticmethod
-    def detect_available_cameras(max_probe: int = 8) -> list[int]:
-        """Probes DirectShow video hardware indices and returns verified available cameras."""
-        available: list[int] = []
-        for idx in range(max_probe):
-            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
-            if cap.isOpened():
-                ret, _ = cap.read()
-                if ret:
-                    available.append(idx)
-                cap.release()
+    def detect_available_cameras(max_probe: int = 6) -> list[int]:
+        """Probes video hardware indices and returns verified available camera indices."""
+        info = CameraMonitor.detect_available_cameras_info(max_probe=max_probe)
+        return [c["index"] for c in info]
+
+    @staticmethod
+    def detect_available_cameras_info(max_probe: int = 6) -> list[dict[str, Any]]:
+        """Probes video hardware indices and returns detailed metadata for verified cameras."""
+        available: list[dict[str, Any]] = []
+        backend = cv2.CAP_DSHOW if os.name == "nt" else 0
+        with _camera_probe_lock:
+            for idx in range(max_probe):
+                cap = cv2.VideoCapture(idx, backend)
+                if not cap.isOpened() and os.name == "nt":
+                    cap = cv2.VideoCapture(idx)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret and frame is not None and frame.size > 0:
+                        h, w = frame.shape[:2]
+                        resolution_str = f"{w}x{h}"
+                        available.append(
+                            {
+                                "index": idx,
+                                "name": f"Local Camera {idx}",
+                                "resolution": resolution_str,
+                                "display_label": f"Local Camera {idx} ({resolution_str} - Detected)",
+                            }
+                        )
+                    cap.release()
         return available
 
     @staticmethod

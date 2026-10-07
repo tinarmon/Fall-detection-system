@@ -5,6 +5,7 @@ from __future__ import annotations
 from src.fall_detection.camera import (
     CameraMonitor,
     CameraStream,
+    CameraWatcher,
     load_trained_model,
     model_lock,
     shared_model,
@@ -23,6 +24,7 @@ from src.fall_detection.notification import (
 __all__ = [
     "CameraStream",
     "CameraMonitor",
+    "CameraWatcher",
     "load_trained_model",
     "model_lock",
     "shared_model",

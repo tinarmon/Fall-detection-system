@@ -13,3 +13,13 @@ app_debug.log
 .venv/
 .pytest_cache/
 .ruff_cache/
+checkpoints/
+
+# LocalAISecurity Guardrails
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+secrets/
+credentials/

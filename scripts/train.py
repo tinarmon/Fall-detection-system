@@ -119,12 +119,17 @@ def build_gru_model(
 
     model = Sequential()
     model.add(
-        GRU(units[0], return_sequences=(len(units) > 1), input_shape=(time_steps, n_features))
+        GRU(
+            units[0],
+            return_sequences=(len(units) > 1),
+            unroll=True,
+            input_shape=(time_steps, n_features),
+        )
     )
     model.add(Dropout(dropout))
 
     for i in range(1, len(units)):
-        model.add(GRU(units[i], return_sequences=(i < len(units) - 1)))
+        model.add(GRU(units[i], return_sequences=(i < len(units) - 1), unroll=True))
         model.add(Dropout(dropout))
 
     model.add(Dense(dense_units, activation="relu"))
@@ -207,6 +212,23 @@ def train(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     model.save(str(output_path))
     logger.info(f"Model saved to {output_path}")
+
+    # Export accelerated TFLite model
+    try:
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        converter.target_spec.supported_ops = [
+            tf.lite.OpsSet.TFLITE_BUILTINS,
+            tf.lite.OpsSet.SELECT_TF_OPS,
+        ]
+        converter._experimental_lower_tensor_list_ops = False
+        tflite_model = converter.convert()
+        tflite_path = GLOBAL_CONFIG.tflite_model_path
+        with open(tflite_path, "wb") as f:
+            f.write(tflite_model)
+        logger.info(f"TFLite model exported to {tflite_path}")
+    except Exception as ex:
+        logger.warning(f"Could not automatically export TFLite: {ex}")
 
 
 def main() -> None:

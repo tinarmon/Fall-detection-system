@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from src.fall_detection.config import GLOBAL_CONFIG
 
 BASE_DIR = str(GLOBAL_CONFIG.base_dir)
